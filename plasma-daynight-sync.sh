@@ -684,6 +684,48 @@ do_configure() {
     fi
     fi
 
+    # Select Color Schemes
+    if [[ "$configure_all" == true || "$configure_colors" == true ]]; then
+    echo ""
+    read -rp "Configure color schemes? [y/N]: " choice
+    if [[ "$choice" =~ ^[Yy]$ ]]; then
+        echo "Scanning for color schemes..."
+        mapfile -t color_schemes < <(scan_color_schemes)
+
+        if [[ ${#color_schemes[@]} -eq 0 ]]; then
+            echo "No color schemes found, skipping."
+            COLOR_DAY=""
+            COLOR_NIGHT=""
+        else
+            echo ""
+            echo -e "${BOLD}Available color schemes:${RESET}"
+            for i in "${!color_schemes[@]}"; do
+                printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${color_schemes[$i]}"
+            done
+
+            echo ""
+            read -rp "Select ☀️ DAY mode color scheme [1-${#color_schemes[@]}]: " choice
+            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#color_schemes[@]} )); then
+                COLOR_DAY="${color_schemes[$((choice - 1))]}"
+
+                read -rp "Select 🌙 NIGHT mode color scheme [1-${#color_schemes[@]}]: " choice
+                if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#color_schemes[@]} )); then
+                    COLOR_NIGHT="${color_schemes[$((choice - 1))]}"
+                else
+                    COLOR_DAY=""
+                    COLOR_NIGHT=""
+                fi
+            else
+                COLOR_DAY=""
+                COLOR_NIGHT=""
+            fi
+        fi
+    else
+        COLOR_DAY=""
+        COLOR_NIGHT=""
+    fi
+    fi
+
     # Select icon themes
     if [[ "$configure_all" == true || "$configure_icons" == true ]]; then
     echo ""
@@ -889,48 +931,6 @@ do_configure() {
     else
         SPLASH_DAY=""
         SPLASH_NIGHT=""
-    fi
-    fi
-
-    # Select Color Schemes
-    if [[ "$configure_all" == true || "$configure_colors" == true ]]; then
-    echo ""
-    read -rp "Configure color schemes? [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo "Scanning for color schemes..."
-        mapfile -t color_schemes < <(scan_color_schemes)
-
-        if [[ ${#color_schemes[@]} -eq 0 ]]; then
-            echo "No color schemes found, skipping."
-            COLOR_DAY=""
-            COLOR_NIGHT=""
-        else
-            echo ""
-            echo -e "${BOLD}Available color schemes:${RESET}"
-            for i in "${!color_schemes[@]}"; do
-                printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${color_schemes[$i]}"
-            done
-
-            echo ""
-            read -rp "Select ☀️ DAY mode color scheme [1-${#color_schemes[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#color_schemes[@]} )); then
-                COLOR_DAY="${color_schemes[$((choice - 1))]}"
-
-                read -rp "Select 🌙 NIGHT mode color scheme [1-${#color_schemes[@]}]: " choice
-                if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#color_schemes[@]} )); then
-                    COLOR_NIGHT="${color_schemes[$((choice - 1))]}"
-                else
-                    COLOR_DAY=""
-                    COLOR_NIGHT=""
-                fi
-            else
-                COLOR_DAY=""
-                COLOR_NIGHT=""
-            fi
-        fi
-    else
-        COLOR_DAY=""
-        COLOR_NIGHT=""
     fi
     fi
 
