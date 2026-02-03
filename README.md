@@ -20,6 +20,17 @@ It runs as a background service (systemd user unit) to ensure your desktop exper
 -   `inotify-tools`: Required for monitoring configuration changes.
 -   `kvantum`: If you want to manage Kvantum themes.
 
+### Optional: Seamless Qt App Refresh
+
+By default, some Qt applications may not refresh their styles until restarted. To enable seamless live refreshing of all Qt apps when switching themes, install the [plasma-qt-forcerefresh](https://github.com/edmogeor/plasma-qt-forcerefresh) patch:
+
+```bash
+git clone https://github.com/edmogeor/plasma-qt-forcerefresh.git
+cd plasma-qt-forcerefresh && ./plasma-integration-patch-manager.sh install
+```
+
+This patches `plasma-integration` to add a DBus signal that forces Qt apps to reload their styles without restarting.
+
 ## Installation & Configuration
 
 1.  **Clone or Download** this repository.
