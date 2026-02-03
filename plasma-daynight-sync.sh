@@ -350,6 +350,7 @@ apply_theme() {
         apply_browser_color_scheme "dark"
         [[ -n "$SCRIPT_DARK" && -x "$SCRIPT_DARK" ]] && "$SCRIPT_DARK"
         dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh
+        echo "dark" > "${XDG_RUNTIME_DIR}/plasma-daynight-mode"
         echo "[$(date)] Switched to 🌙 DARK mode"
     elif [[ "$laf" == "$LAF_LIGHT" ]]; then
         if [[ -n "$KVANTUM_LIGHT" ]]; then
@@ -363,6 +364,7 @@ apply_theme() {
         apply_browser_color_scheme "light"
         [[ -n "$SCRIPT_LIGHT" && -x "$SCRIPT_LIGHT" ]] && "$SCRIPT_LIGHT"
         dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh
+        echo "light" > "${XDG_RUNTIME_DIR}/plasma-daynight-mode"
         echo "[$(date)] Switched to ☀️ LIGHT mode"
     else
         echo "[$(date)] Unknown LookAndFeel: $laf — skipping"

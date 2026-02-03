@@ -14,8 +14,6 @@ PlasmoidItem {
 
     property bool isDarkMode: false
     property bool isRunning: false
-    property string currentLaf: ""
-    property string darkLaf: ""
 
     readonly property bool inPanel: (Plasmoid.location === PlasmaCore.Types.TopEdge
         || Plasmoid.location === PlasmaCore.Types.RightEdge
@@ -29,43 +27,60 @@ PlasmoidItem {
     Plasmoid.onActivated: toggleMode()
 
     Component.onCompleted: {
-        checkCurrentMode()
+        modeReader.checkMode()
+        modeWatcher.running = true
     }
 
+    // Read mode from status file (written by plasma-daynight-sync script)
     Plasma5Support.DataSource {
-        id: executable
+        id: modeReader
         engine: "executable"
         connectedSources: []
 
         onNewData: (sourceName, data) => {
-            var stdout = data["stdout"].trim()
-
-            if (sourceName.indexOf("LookAndFeelPackage") !== -1) {
-                root.currentLaf = stdout
-                executable.connectSource("kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel")
-            } else if (sourceName.indexOf("DefaultDarkLookAndFeel") !== -1) {
-                root.darkLaf = stdout
-                root.isDarkMode = (root.currentLaf === root.darkLaf)
-                root.isRunning = false
-            } else {
-                root.isRunning = false
-                checkCurrentMode()
+            var mode = data["stdout"].trim()
+            if (mode === "dark") {
+                root.isDarkMode = true
+            } else if (mode === "light") {
+                root.isDarkMode = false
             }
+            root.isRunning = false
+            disconnectSource(sourceName)
+        }
+
+        function checkMode() {
+            connectSource("cat $XDG_RUNTIME_DIR/plasma-daynight-mode 2>/dev/null")
+        }
+    }
+
+    // Toggle command runner
+    Plasma5Support.DataSource {
+        id: toggleRunner
+        engine: "executable"
+        connectedSources: []
+
+        onNewData: (sourceName, data) => {
+            root.isRunning = false
             disconnectSource(sourceName)
         }
     }
 
-    function checkCurrentMode() {
-        executable.connectSource("kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage")
+    // Poll status file (reading from tmpfs is very cheap)
+    Timer {
+        id: modeWatcher
+        interval: 1000
+        running: false
+        repeat: true
+        onTriggered: modeReader.checkMode()
     }
 
     function toggleMode() {
         if (isRunning) return
         isRunning = true
         if (isDarkMode) {
-            executable.connectSource("plasma-daynight-sync light")
+            toggleRunner.connectSource("plasma-daynight-sync light")
         } else {
-            executable.connectSource("plasma-daynight-sync dark")
+            toggleRunner.connectSource("plasma-daynight-sync dark")
         }
     }
 
@@ -78,9 +93,7 @@ PlasmoidItem {
 
         Kirigami.Icon {
             source: Plasmoid.icon
-            anchors {
-                fill: parent
-            }
+            anchors.fill: parent
             active: mouseArea.containsMouse
         }
 
