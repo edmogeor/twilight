@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# plasma-theme-watcher.sh
-# Manages the plasma-theme-watcher: a theme switcher for KDE day/night mode.
+# plasma-daynight-sync.sh
+# Manages the plasma-daynight-sync: a theme switcher for KDE day/night mode.
 #   configure [options]  Scan themes, save config, generate watcher script, enable systemd service
 #                        Options: -k|--kvantum -i|--icons -g|--gtk -o|--konsole -c|--color-scheme -s|--script -w|--wallpaper
 #                        With no options, configures all. With options, only reconfigures specified types.
@@ -19,11 +19,11 @@ BLUE='\033[0;34m'
 RESET='\033[0m'
 
 KVANTUM_DIR="${HOME}/.config/Kvantum"
-CONFIG_FILE="${HOME}/.config/plasma-theme-watcher.conf"
-SERVICE_NAME="plasma-theme-watcher"
+CONFIG_FILE="${HOME}/.config/plasma-daynight-sync.conf"
+SERVICE_NAME="plasma-daynight-sync"
 SERVICE_DIR="${HOME}/.config/systemd/user"
 SERVICE_FILE="${SERVICE_DIR}/${SERVICE_NAME}.service"
-CLI_PATH="${HOME}/.local/bin/plasma-theme-watcher"
+CLI_PATH="${HOME}/.local/bin/plasma-daynight-sync"
 
 scan_kvantum_themes() {
     local themes=()
@@ -674,7 +674,7 @@ EOF
     # Install globally?
     local executable_path
     echo ""
-    read -rp "Do you want to install 'plasma-theme-watcher' globally to ~/.local/bin? [y/N]: " choice
+    read -rp "Do you want to install 'plasma-daynight-sync' globally to ~/.local/bin? [y/N]: " choice
     if [[ "$choice" =~ ^[Yy]$ ]]; then
         mkdir -p "$(dirname "$CLI_PATH")"
         cp "$0" "$CLI_PATH"
@@ -797,7 +797,7 @@ do_status() {
 
 show_help() {
     cat <<EOF
-plasma-theme-watcher - A theme switcher for KDE day/night mode
+plasma-daynight-sync - A theme switcher for KDE day/night mode
 
 Usage: $0 <command> [options]
 

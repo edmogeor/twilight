@@ -1,6 +1,6 @@
-# Plasma Theme Watcher
+# Plasma Day/Night Sync
 
-**Plasma Theme Watcher** is a robust theme switcher for the KDE Plasma desktop environment. It hooks into KDE's built-in Light/Dark mode switcher to automatically synchronize theme components that otherwise wouldn't get switched, such as Kvantum themes, GTK themes, Icon sets, Konsole profiles, and even custom scripts.
+**Plasma Day/Night Sync** is a robust theme switcher for the KDE Plasma desktop environment. It hooks into KDE's built-in Light/Dark mode switcher to automatically synchronize theme components that otherwise wouldn't get switched, such as Kvantum themes, GTK themes, Icon sets, Konsole profiles, and even custom scripts.
 
 It runs as a background service (systemd user unit) to ensure your desktop experience is consistent whenever you toggle the global theme via Quick Settings or when KDE switches the theme automatically.
 
@@ -36,11 +36,11 @@ This patches `plasma-integration` to add a DBus signal that forces Qt apps to re
 1.  **Clone or Download** this repository.
 2.  **Make the script executable** (optional, the script handles installation):
     ```bash
-    chmod +x plasma-theme-watcher.sh
+    chmod +x plasma-daynight-sync.sh
     ```
 3.  **Run the configuration wizard**:
     ```bash
-    ./plasma-theme-watcher.sh configure
+    ./plasma-daynight-sync.sh configure
     ```
 
 The `configure` command will:
@@ -48,18 +48,18 @@ The `configure` command will:
 -   Ask you to select which ones to use for **Light Mode** and **Dark Mode**.
 -   Detect your current Plasma Light/Dark global themes.
 -   Install the script to `~/.local/bin/` (optional).
--   Create and enable a systemd user service (`plasma-theme-watcher.service`).
+-   Create and enable a systemd user service (`plasma-daynight-sync.service`).
 
 ### Partial Re-configuration
 
 You can re-configure specific components without going through the whole wizard:
 
 ```bash
-./plasma-theme-watcher.sh configure --kvantum    # Only re-configure Kvantum
-./plasma-theme-watcher.sh configure --icons      # Only re-configure Icons
-./plasma-theme-watcher.sh configure --gtk        # Only re-configure GTK
-./plasma-theme-watcher.sh configure --konsole    # Only re-configure Konsole
-./plasma-theme-watcher.sh configure --script     # Only re-configure Custom Scripts
+./plasma-daynight-sync.sh configure --kvantum    # Only re-configure Kvantum
+./plasma-daynight-sync.sh configure --icons      # Only re-configure Icons
+./plasma-daynight-sync.sh configure --gtk        # Only re-configure GTK
+./plasma-daynight-sync.sh configure --konsole    # Only re-configure Konsole
+./plasma-daynight-sync.sh configure --script     # Only re-configure Custom Scripts
 ```
 
 ## Usage
@@ -70,13 +70,13 @@ Once configured and installed, the service runs in the background. You usually d
 
 | Command | Description |
 | :--- | :--- |
-| `plasma-theme-watcher configure` | Run the setup wizard. |
-| `plasma-theme-watcher status` | Show the service status and current theme configuration. |
-| `plasma-theme-watcher light` | Manually force **Light Mode** (and sync all sub-themes). |
-| `plasma-theme-watcher dark` | Manually force **Dark Mode** (and sync all sub-themes). |
-| `plasma-theme-watcher toggle` | Toggle between Light and Dark modes. |
-| `plasma-theme-watcher remove` | Stop the service and remove all configuration/installed files. |
-| `plasma-theme-watcher watch` | Run the monitor in the foreground (used by the service). |
+| `plasma-daynight-sync configure` | Run the setup wizard. |
+| `plasma-daynight-sync status` | Show the service status and current theme configuration. |
+| `plasma-daynight-sync light` | Manually force **Light Mode** (and sync all sub-themes). |
+| `plasma-daynight-sync dark` | Manually force **Dark Mode** (and sync all sub-themes). |
+| `plasma-daynight-sync toggle` | Toggle between Light and Dark modes. |
+| `plasma-daynight-sync remove` | Stop the service and remove all configuration/installed files. |
+| `plasma-daynight-sync watch` | Run the monitor in the foreground (used by the service). |
 
 ## How it works
 
@@ -90,5 +90,5 @@ Once configured and installed, the service runs in the background. You usually d
 To remove the service and configuration:
 
 ```bash
-plasma-theme-watcher remove
+plasma-daynight-sync remove
 ```
