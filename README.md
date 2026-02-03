@@ -169,6 +169,7 @@ To set up automatic day/night wallpaper switching:
    - Open System Settings > Wallpaper
    - Your new wallpaper should appear in the list
    - Select it to enable automatic day/night switching
+   - Ensure **Switch dynamic wallpapers:** is set to **Based on whether Plasma style is light or dark**
 
 KDE will automatically switch between day and night wallpapers based on your Day/Night mode settings.
 
