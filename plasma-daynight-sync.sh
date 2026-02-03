@@ -262,6 +262,7 @@ EOF
 
     echo -e "${GREEN}Keyboard shortcut installed: Meta+Shift+L${RESET}"
     echo "You can change it in System Settings > Shortcuts > Commands"
+    echo -e "${YELLOW}Note:${RESET} You may need to log out and back in for the shortcut to take effect."
 }
 
 remove_shortcut() {
@@ -692,137 +693,6 @@ clean_app_overrides() {
     done < <(find "${HOME}/.config" -maxdepth 1 -type f)
 }
 
-get_other_users() {
-    # Get list of regular users (UID >= 1000, excluding current user and nobody)
-    while IFS=: read -r username _ uid _ _ home _; do
-        [[ "$uid" -ge 1000 && "$uid" -lt 65534 && "$username" != "$USER" && -d "$home" ]] || continue
-        echo "$username:$home"
-    done < /etc/passwd
-}
-
-apply_to_other_users() {
-    local users
-    mapfile -t users < <(get_other_users)
-
-    if [[ ${#users[@]} -eq 0 ]]; then
-        echo "No other users found on the system."
-        return 0
-    fi
-
-    # Check if we have sudo access
-    if ! sudo -n true 2>/dev/null; then
-        # Try to get sudo access
-        if ! sudo true 2>/dev/null; then
-            echo ""
-            echo -e "${YELLOW}Could not obtain sudo access.${RESET}"
-            echo "To apply settings to all users, run:"
-            echo -e "  ${BOLD}sudo plasma-daynight-sync configure --all-users${RESET}"
-            return 1
-        fi
-    fi
-
-    echo ""
-    echo -e "${BLUE}Applying settings to all users...${RESET}"
-
-    for user_entry in "${users[@]}"; do
-        local username="${user_entry%%:*}"
-        local user_home="${user_entry#*:}"
-
-        echo -e "  Configuring ${BOLD}$username${RESET}..."
-
-        # Copy local themes if needed
-        if [[ -n "$KVANTUM_DAY" || -n "$KVANTUM_NIGHT" ]]; then
-            for theme in "$KVANTUM_DAY" "$KVANTUM_NIGHT"; do
-                [[ -z "$theme" ]] && continue
-                if [[ -d "${HOME}/.config/Kvantum/$theme" ]]; then
-                    sudo mkdir -p "$user_home/.config/Kvantum" 2>/dev/null
-                    sudo cp -r "${HOME}/.config/Kvantum/$theme" "$user_home/.config/Kvantum/" 2>/dev/null
-                    sudo chown -R "$username:$username" "$user_home/.config/Kvantum/$theme" 2>/dev/null
-                fi
-            done
-        fi
-
-        # Copy local icon themes if needed
-        for theme in "$ICON_DAY" "$ICON_NIGHT" "$CURSOR_DAY" "$CURSOR_NIGHT"; do
-            [[ -z "$theme" ]] && continue
-            for src_dir in "${HOME}/.local/share/icons" "${HOME}/.icons"; do
-                if [[ -d "$src_dir/$theme" ]]; then
-                    sudo mkdir -p "$user_home/.local/share/icons" 2>/dev/null
-                    sudo cp -r "$src_dir/$theme" "$user_home/.local/share/icons/" 2>/dev/null
-                    sudo chown -R "$username:$username" "$user_home/.local/share/icons/$theme" 2>/dev/null
-                    break
-                fi
-            done
-        done
-
-        # Copy local GTK themes if needed
-        for theme in "$GTK_DAY" "$GTK_NIGHT"; do
-            [[ -z "$theme" ]] && continue
-            for src_dir in "${HOME}/.themes" "${HOME}/.local/share/themes"; do
-                if [[ -d "$src_dir/$theme" ]]; then
-                    sudo mkdir -p "$user_home/.local/share/themes" 2>/dev/null
-                    sudo cp -r "$src_dir/$theme" "$user_home/.local/share/themes/" 2>/dev/null
-                    sudo chown -R "$username:$username" "$user_home/.local/share/themes/$theme" 2>/dev/null
-                    break
-                fi
-            done
-        done
-
-        # Copy the config file
-        sudo cp "$CONFIG_FILE" "$user_home/.config/plasma-daynight-sync.conf" 2>/dev/null
-        sudo chown "$username:$username" "$user_home/.config/plasma-daynight-sync.conf" 2>/dev/null
-
-        # Set the Day/Night themes in KDE settings
-        local laf_day laf_night
-        laf_day=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel)
-        laf_night=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel)
-        if [[ -n "$laf_day" ]]; then
-            sudo -u "$username" kwriteconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel "$laf_day" 2>/dev/null || true
-        fi
-        if [[ -n "$laf_night" ]]; then
-            sudo -u "$username" kwriteconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel "$laf_night" 2>/dev/null || true
-        fi
-        # Enable automatic theme switching
-        sudo -u "$username" kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true 2>/dev/null || true
-
-        # Copy the script if installed globally
-        if [[ -f "$CLI_PATH" ]]; then
-            sudo mkdir -p "$user_home/.local/bin" 2>/dev/null
-            sudo cp "$CLI_PATH" "$user_home/.local/bin/plasma-daynight-sync" 2>/dev/null
-            sudo chown "$username:$username" "$user_home/.local/bin/plasma-daynight-sync" 2>/dev/null
-        fi
-
-        # Install and enable systemd service for the user
-        sudo mkdir -p "$user_home/.config/systemd/user" 2>/dev/null
-        sudo mkdir -p "$user_home/.config/systemd/user/default.target.wants" 2>/dev/null
-
-        # Update service file to use the user's path
-        local user_service="$user_home/.config/systemd/user/plasma-daynight-sync.service"
-        sudo bash -c "cat > '$user_service'" <<EOF
-[Unit]
-Description=Plasma auto theme watcher (Kvantum switcher)
-
-[Service]
-ExecStart=$user_home/.local/bin/plasma-daynight-sync watch
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=default.target
-EOF
-        sudo chown "$username:$username" "$user_service" 2>/dev/null
-
-        # Enable the service by creating symlink
-        sudo ln -sf ../plasma-daynight-sync.service "$user_home/.config/systemd/user/default.target.wants/plasma-daynight-sync.service" 2>/dev/null
-        sudo chown -h "$username:$username" "$user_home/.config/systemd/user/default.target.wants/plasma-daynight-sync.service" 2>/dev/null
-
-        echo -e "    ${GREEN}✓${RESET} Done"
-    done
-
-    echo ""
-    echo -e "${GREEN}Settings applied to all users.${RESET}"
-}
-
 do_configure() {
     check_desktop_environment
     check_dependencies
@@ -848,7 +718,6 @@ do_configure() {
     local configure_cursors=false
     local configure_widget=false
     local configure_shortcut=false
-    local configure_allusers=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -864,10 +733,10 @@ do_configure() {
             -C|--cursors)       configure_cursors=true; configure_all=false ;;
             -w|--widget)        configure_widget=true; configure_all=false ;;
             -K|--shortcut)      configure_shortcut=true; configure_all=false ;;
-            -a|--all-users)     configure_allusers=true ;;
+            -h|--help)          show_configure_help; exit 0 ;;
             *)
                 echo "Unknown option: $1" >&2
-                echo "Options: -k|--kvantum -p|--style -d|--decorations -c|--colors -i|--icons -C|--cursors -g|--gtk -o|--konsole -s|--script -S|--splash -w|--widget -K|--shortcut -a|--all-users" >&2
+                echo "Options: -k|--kvantum -p|--style -d|--decorations -c|--colors -i|--icons -C|--cursors -g|--gtk -o|--konsole -s|--script -S|--splash -w|--widget -K|--shortcut" >&2
                 exit 1
                 ;;
         esac
@@ -1506,22 +1375,6 @@ EOF
 
     echo -e "${GREEN}Successfully configured and started $SERVICE_NAME.${RESET}"
 
-    # Apply settings to other users if requested via flag
-    if [[ "$configure_allusers" == true ]]; then
-        apply_to_other_users
-    # Offer to apply settings to other users (only if other users exist)
-    elif [[ "$configure_all" == true ]]; then
-        local other_users
-        mapfile -t other_users < <(get_other_users)
-        if [[ ${#other_users[@]} -gt 0 ]]; then
-            echo ""
-            read -rp "Apply these settings to all users on this system? [y/N]: " choice
-            if [[ "$choice" =~ ^[Yy]$ ]]; then
-                apply_to_other_users
-            fi
-        fi
-    fi
-
     # Check if plasma-qt-forcerefresh patch is installed
     local is_patched=""
     is_patched=$(nm -C /usr/lib/qt6/plugins/platformthemes/KDEPlasmaPlatformTheme6.so 2>/dev/null | grep "forceStyleRefresh" || true)
@@ -1669,6 +1522,41 @@ do_status() {
     fi
 }
 
+show_configure_help() {
+    cat <<EOF
+Usage: $0 configure [options]
+
+Description:
+  Scan themes, save config, enable systemd service, and optionally install helper tools.
+  With no options, runs the full configuration wizard.
+  With options, only reconfigures the specified components.
+
+Options:
+  -k, --kvantum       Configure Kvantum themes only
+  -i, --icons         Configure icon themes only
+  -g, --gtk           Configure GTK themes only
+  -o, --konsole       Configure Konsole profiles only
+  -S, --splash        Configure splash screens only
+  -c, --colors        Configure color schemes only
+  -p, --style         Configure Plasma styles only
+  -d, --decorations   Configure window decorations only
+  -C, --cursors       Configure cursor themes only
+  -s, --script        Configure custom scripts only
+  -w, --widget        Install/reinstall panel widget
+  -K, --shortcut      Install/reinstall keyboard shortcut (Meta+Shift+L)
+
+Panel Widget:
+  During configuration, if you install the command globally (~/.local/bin),
+  you'll be offered to install a Day/Night Toggle panel widget. This adds
+  a sun/moon button to your panel for quick theme switching.
+
+Examples:
+  $0 configure              Configure all theme options
+  $0 configure -k -i        Configure only Kvantum and icon themes
+  $0 configure --splash     Configure only splash screens
+EOF
+}
+
 show_help() {
     cat <<EOF
 plasma-daynight-sync - A theme switcher for KDE day/night mode
@@ -1685,35 +1573,7 @@ Commands:
   status       Show service status and current configuration
   help         Show this help message
 
-Configure options:
-  -k, --kvantum       Configure Kvantum themes only
-  -i, --icons         Configure icon themes only
-  -g, --gtk           Configure GTK themes only
-  -o, --konsole       Configure Konsole profiles only
-  -S, --splash        Configure splash screens only
-  -c, --colors        Configure color schemes only
-  -p, --style         Configure Plasma styles only
-  -d, --decorations   Configure window decorations only
-  -C, --cursors       Configure cursor themes only
-  -s, --script        Configure custom scripts only
-  -w, --widget        Install/reinstall panel widget
-  -K, --shortcut      Install/reinstall keyboard shortcut (Meta+Shift+L)
-
-  With no options, configures all. With options, only reconfigures specified types.
-
-Panel Widget:
-  During configuration, if you install the command globally (~/.local/bin),
-  you'll be offered to install a Day/Night Toggle panel widget. This adds
-  a sun/moon button to your panel for quick theme switching.
-
-Examples:
-  $0 configure              Configure all theme options
-  $0 configure -k -i        Configure only Kvantum and icon themes
-  $0 configure --splash     Configure only splash screens
-  $0 configure --script     Configure only custom scripts
-  $0 configure --all-users  Apply settings to all users on the system
-  $0 status                 Show current configuration
-  $0 remove                 Remove all installed files
+Run '$0 configure --help' for detailed configuration options.
 EOF
 }
 
@@ -1725,7 +1585,7 @@ case "${1:-}" in
     toggle)    do_toggle ;;
     remove)    do_remove ;;
     status)    do_status ;;
-    help|-h|--help) show_help ;;
+    ""|help|-h|--help) show_help ;;
     *)
         echo "Usage: $0 <command> [options]"
         echo "Try '$0 help' for more information."

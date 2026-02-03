@@ -21,10 +21,9 @@ It runs as a background service (systemd user unit) to ensure your desktop exper
 -   **Konsole Profiles:** Switches Konsole profiles live for running instances and new windows.
 -   **Splash Screen:** Optionally overrides or changes the splash screen.
 -   **Custom Scripts:** Run arbitrary scripts when switching to Day or Night mode.
--   **System-wide Setup:** Optionally apply settings to all users on the system.
 -   **Systemd Service:** Installs a user-level systemd service to watch for changes automatically.
 -   **Panel Widget:** Optional Day/Night Toggle widget for your panel.
--   **Keyboard Shortcut:** Toggle themes with Meta+Shift+L (customizable in System Settings > Shortcuts).
+-   **Keyboard Shortcut:** Toggle themes with Meta+Shift+L (customizable in System Settings > Shortcuts). **Note:** You may need to log out and back in for the shortcut to take effect.
 
 ## Requirements
 
@@ -71,8 +70,7 @@ The `configure` command will:
 -   Detect your current Plasma Day/Night global themes.
 -   Install the script to `~/.local/bin/` (optional).
 -   Install the Day/Night Toggle panel widget (optional).
--   Add a keyboard shortcut (Meta+Shift+L) for quick toggling (optional).
--   Apply settings to all users on the system (optional, requires sudo).
+-   Add a keyboard shortcut (Meta+Shift+L) for quick toggling (optional). **Note:** You may need to log out and back in for the shortcut to take effect.
 -   Create and enable a systemd user service (`plasma-daynight-sync.service`).
 
 ### Partial Re-configuration
@@ -92,7 +90,6 @@ You can re-configure specific components without going through the whole wizard:
 ./plasma-daynight-sync.sh configure --script       # Only re-configure Custom Scripts
 ./plasma-daynight-sync.sh configure --widget       # Install/reinstall panel widget
 ./plasma-daynight-sync.sh configure --shortcut     # Install/reinstall keyboard shortcut
-./plasma-daynight-sync.sh configure --all-users    # Apply settings to all users
 ```
 
 ## Usage
