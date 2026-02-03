@@ -520,7 +520,7 @@ update_laf_icons() {
             # Copy and update metadata
             if [[ -f "${system_laf_root}/metadata.json" ]]; then
                 jq --arg id "$new_id" \
-                   --arg name "$friendly_name (Copy)" \
+                   --arg name "$friendly_name ($icon_theme)" \
                    --arg fallback "$original_id" \
                    '.KPlugin.Id = $id | .KPlugin.Name = $name | .["X-KDE-fallbackPackage"] = $fallback' \
                    "${system_laf_root}/metadata.json" > "${new_laf_root}/metadata.json"
