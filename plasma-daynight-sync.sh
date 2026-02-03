@@ -240,6 +240,39 @@ apply_browser_color_scheme() {
         "variant:uint32:$portal_value" 2>/dev/null || true
 }
 
+apply_flatpak_theme() {
+    local theme="$1"
+    command -v flatpak &>/dev/null || return 0
+    flatpak override --user --env=GTK_THEME="$theme" 2>/dev/null || true
+}
+
+apply_flatpak_icons() {
+    local icons="$1"
+    command -v flatpak &>/dev/null || return 0
+    flatpak override --user --env=GTK_ICON_THEME="$icons" 2>/dev/null || true
+}
+
+get_current_icon_theme() {
+    kreadconfig6 --file kdeglobals --group Icons --key Theme 2>/dev/null
+}
+
+setup_flatpak_permissions() {
+    command -v flatpak &>/dev/null || return 0
+    flatpak override --user \
+        --filesystem=~/.themes:ro \
+        --filesystem=~/.local/share/themes:ro \
+        --filesystem=~/.icons:ro \
+        --filesystem=~/.local/share/icons:ro \
+        --filesystem=xdg-config/Kvantum:ro \
+        2>/dev/null || true
+}
+
+setup_flatpak_kvantum() {
+    command -v flatpak &>/dev/null || return 0
+    flatpak override --user --env=QT_STYLE_OVERRIDE=kvantum 2>/dev/null || true
+}
+
+
 apply_gtk_theme() {
     local theme="$1"
 
@@ -259,6 +292,9 @@ apply_gtk_theme() {
         sed -i "s/Net\/ThemeName \".*\"/Net\/ThemeName \"$theme\"/" "${HOME}/.config/xsettingsd/xsettingsd.conf" 2>/dev/null || true
         pkill -HUP xsettingsd 2>/dev/null || true
     fi
+
+    # Update Flatpak GTK theme
+    apply_flatpak_theme "$theme"
 }
 
 apply_konsole_profile() {
@@ -363,6 +399,14 @@ apply_theme() {
         fi
         [[ -n "$ICON_NIGHT" && -n "$PLASMA_CHANGEICONS" ]] && "$PLASMA_CHANGEICONS" "$ICON_NIGHT"
         [[ -n "$GTK_NIGHT" ]] && apply_gtk_theme "$GTK_NIGHT"
+        # Apply Flatpak icons (use configured icons, or fall back to theme default)
+        if [[ -n "$GTK_NIGHT" ]]; then
+            if [[ -n "$ICON_NIGHT" ]]; then
+                apply_flatpak_icons "$ICON_NIGHT"
+            else
+                apply_flatpak_icons "$(get_current_icon_theme)"
+            fi
+        fi
         [[ -n "$KONSOLE_NIGHT" ]] && apply_konsole_profile "$KONSOLE_NIGHT"
         apply_splash "$SPLASH_NIGHT"
         apply_browser_color_scheme "night"
@@ -377,6 +421,14 @@ apply_theme() {
         fi
         [[ -n "$ICON_DAY" && -n "$PLASMA_CHANGEICONS" ]] && "$PLASMA_CHANGEICONS" "$ICON_DAY"
         [[ -n "$GTK_DAY" ]] && apply_gtk_theme "$GTK_DAY"
+        # Apply Flatpak icons (use configured icons, or fall back to theme default)
+        if [[ -n "$GTK_DAY" ]]; then
+            if [[ -n "$ICON_DAY" ]]; then
+                apply_flatpak_icons "$ICON_DAY"
+            else
+                apply_flatpak_icons "$(get_current_icon_theme)"
+            fi
+        fi
         [[ -n "$KONSOLE_DAY" ]] && apply_konsole_profile "$KONSOLE_DAY"
         apply_splash "$SPLASH_DAY"
         apply_browser_color_scheme "day"
@@ -593,6 +645,11 @@ do_configure() {
                 read -rp "Select 🌙 NIGHT mode Kvantum theme [1-${#themes[@]}]: " choice
                 if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#themes[@]} )); then
                     KVANTUM_NIGHT="${themes[$((choice - 1))]}"
+                    if command -v flatpak &>/dev/null; then
+                        setup_flatpak_permissions
+                        setup_flatpak_kvantum
+                        echo -e "${YELLOW}Note:${RESET} Flatpak apps may need to be closed and reopened to update theme."
+                    fi
                 else
                     KVANTUM_DAY=""
                     KVANTUM_NIGHT=""
@@ -685,10 +742,10 @@ do_configure() {
     fi
     fi
 
-    # Select GTK themes
+    # Select GTK/Flatpak themes
     if [[ "$configure_all" == true || "$configure_gtk" == true ]]; then
     echo ""
-    read -rp "Configure GTK themes? [y/N]: " choice
+    read -rp "Configure GTK/Flatpak themes? [y/N]: " choice
     if [[ "$choice" =~ ^[Yy]$ ]]; then
         echo "Scanning for GTK themes..."
         mapfile -t gtk_themes < <(scan_gtk_themes)
@@ -712,6 +769,10 @@ do_configure() {
                 read -rp "Select 🌙 NIGHT mode GTK theme [1-${#gtk_themes[@]}]: " choice
                 if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#gtk_themes[@]} )); then
                     GTK_NIGHT="${gtk_themes[$((choice - 1))]}"
+                    if command -v flatpak &>/dev/null; then
+                        setup_flatpak_permissions
+                        echo -e "${YELLOW}Note:${RESET} Flatpak apps may need to be closed and reopened to update theme."
+                    fi
                 else
                     GTK_DAY=""
                     GTK_NIGHT=""
@@ -1015,6 +1076,14 @@ do_remove() {
 
     # Remove keyboard shortcut if installed
     remove_shortcut
+
+    # Reset Flatpak overrides we set
+    if command -v flatpak &>/dev/null; then
+        flatpak override --user --unset-env=GTK_THEME 2>/dev/null || true
+        flatpak override --user --unset-env=GTK_ICON_THEME 2>/dev/null || true
+        flatpak override --user --unset-env=QT_STYLE_OVERRIDE 2>/dev/null || true
+        echo "Reset Flatpak theme overrides"
+    fi
 
     if [[ "$removed" -eq 1 ]]; then
         systemctl --user daemon-reload

@@ -12,6 +12,7 @@ It runs as a background service (systemd user unit) to ensure your desktop exper
 
 -   **Kvantum Integration:** Automatically switches Kvantum themes (useful for application styling).
 -   **GTK Theme Sync:** Updates GTK 3/4 themes to match your Plasma preference.
+-   **Flatpak Support:** Automatically applies GTK and Kvantum themes to Flatpak apps, with icon support.
 -   **Icon Theme Sync:** Changes icon packs for Day/Night modes.
 -   **Konsole Profiles:** Switches Konsole profiles live for running instances and new windows.
 -   **Splash Screen:** Optionally overrides or changes the splash screen.
@@ -25,6 +26,7 @@ It runs as a background service (systemd user unit) to ensure your desktop exper
 -   **KDE Plasma 6** (uses `kreadconfig6`/`kwriteconfig6`)
 -   `inotify-tools`: Required for monitoring configuration changes.
 -   `kvantum`: If you want to manage Kvantum themes.
+-   `flatpak`: Optional. If installed, GTK/Kvantum themes and icons are automatically applied to Flatpak apps.
 
 ### Optional: Seamless Qt App Refresh
 
@@ -36,6 +38,18 @@ cd plasma-qt-forcerefresh && ./plasma-integration-patch-manager.sh install
 ```
 
 This patches `plasma-integration` to add a DBus signal that forces Qt apps to reload their styles without restarting.
+
+### Flatpak Notes
+
+When you configure GTK or Kvantum themes, the script automatically sets up Flatpak permissions to access theme directories. Themes and icons are applied via environment variable overrides (`GTK_THEME`, `GTK_ICON_THEME`, `QT_STYLE_OVERRIDE`).
+
+**Note:** Flatpak apps need to be closed and reopened for theme changes to take effect.
+
+For Kvantum-styled Flatpak Qt apps, you may also need to install the Kvantum runtime:
+
+```bash
+flatpak install org.kde.KStyle.Kvantum
+```
 
 ## Installation & Configuration
 
