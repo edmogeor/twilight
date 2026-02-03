@@ -29,6 +29,46 @@ PLASMOID_INSTALL_DIR="${HOME}/.local/share/plasma/plasmoids/${PLASMOID_ID}"
 DESKTOP_FILE="${HOME}/.local/share/applications/plasma-daynight-toggle.desktop"
 SHORTCUT_ID="plasma-daynight-toggle.desktop"
 
+get_friendly_name() {
+    local type="$1"
+    local id="$2"
+    [[ -z "$id" ]] && return 0
+
+    case "$type" in
+        laf)
+            for dir in /usr/share/plasma/look-and-feel "${HOME}/.local/share/plasma/look-and-feel"; do
+                if [[ -f "${dir}/${id}/metadata.json" ]] && command -v jq &>/dev/null; then
+                    jq -r '.KPlugin.Name // empty' "${dir}/${id}/metadata.json" 2>/dev/null && return 0
+                fi
+            done
+            ;;
+        decoration)
+            if [[ "$id" == "__aurorae__svg__"* ]]; then
+                local theme_name="${id#__aurorae__svg__}"
+                for dir in /usr/share/aurorae/themes "${HOME}/.local/share/aurorae/themes"; do
+                    if [[ -f "${dir}/${theme_name}/metadata.desktop" ]]; then
+                        grep -m1 "^Name=" "${dir}/${theme_name}/metadata.desktop" 2>/dev/null | cut -d= -f2 && return 0
+                    fi
+                done
+                echo "$theme_name" && return 0
+            elif [[ "$id" == "org.kde.breeze" ]]; then echo "Breeze" && return 0
+            elif [[ "$id" == "org.kde.oxygen" ]]; then echo "Oxygen" && return 0
+            elif [[ "$id" == "org.kde.plastik" ]]; then echo "Plastik" && return 0
+            elif [[ "$id" == "org.kde.kwin.aurorae" ]]; then echo "Aurorae" && return 0
+            fi
+            ;;
+        splash)
+            [[ "$id" == "None" ]] && echo "None" && return 0
+            for dir in /usr/share/plasma/look-and-feel "${HOME}/.local/share/plasma/look-and-feel"; do
+                if [[ -f "${dir}/${id}/metadata.json" ]] && command -v jq &>/dev/null; then
+                    jq -r '.KPlugin.Name // empty' "${dir}/${id}/metadata.json" 2>/dev/null && return 0
+                fi
+            done
+            ;;
+    esac
+    echo "$id"
+}
+
 show_laf_reminder() {
     echo -e "${YELLOW}Reminder:${RESET} Make sure your Day and Night themes are set to your preferred themes."
     echo "You can set them in: System Settings > Quick Settings"
@@ -86,21 +126,19 @@ scan_window_decorations() {
             id="__aurorae__svg__$(basename "$theme_dir")"
             [[ "$seen_ids" == *"|$id|"* ]] && continue
             seen_ids+="|$id|"
-            # Get friendly name from metadata.desktop
-            name=""
-            if [[ -f "${theme_dir}metadata.desktop" ]]; then
-                name=$(grep -m1 "^Name=" "${theme_dir}metadata.desktop" 2>/dev/null | cut -d= -f2)
-            fi
-            printf '%s|%s\n' "$id" "${name:-$(basename "$theme_dir")}"
+            
+            # Use centralized function for name
+            name=$(get_friendly_name decoration "$id")
+            printf '%s|%s\n' "$id" "$name"
         done
     done
     # Built-in decorations (check if plugin exists)
     for plugin_dir in /usr/lib/qt6/plugins/org.kde.kdecoration2 /usr/lib64/qt6/plugins/org.kde.kdecoration2 /usr/lib/x86_64-linux-gnu/qt6/plugins/org.kde.kdecoration2; do
         [[ -d "$plugin_dir" ]] || continue
-        [[ -f "$plugin_dir/org.kde.breeze.so" || -f "$plugin_dir/breeze.so" ]] && printf '%s|%s\n' "org.kde.breeze" "Breeze"
-        [[ -f "$plugin_dir/org.kde.oxygen.so" || -f "$plugin_dir/oxygen.so" ]] && printf '%s|%s\n' "org.kde.oxygen" "Oxygen"
-        [[ -f "$plugin_dir/org.kde.plastik.so" || -f "$plugin_dir/plastik.so" ]] && printf '%s|%s\n' "org.kde.plastik" "Plastik"
-        [[ -f "$plugin_dir/org.kde.kwin.aurorae.so" || -f "$plugin_dir/kwin_aurorae.so" ]] && printf '%s|%s\n' "org.kde.kwin.aurorae" "Aurorae"
+        [[ -f "$plugin_dir/org.kde.breeze.so" || -f "$plugin_dir/breeze.so" ]] && printf '%s|%s\n' "org.kde.breeze" "$(get_friendly_name decoration "org.kde.breeze")"
+        [[ -f "$plugin_dir/org.kde.oxygen.so" || -f "$plugin_dir/oxygen.so" ]] && printf '%s|%s\n' "org.kde.oxygen" "$(get_friendly_name decoration "org.kde.oxygen")"
+        [[ -f "$plugin_dir/org.kde.plastik.so" || -f "$plugin_dir/plastik.so" ]] && printf '%s|%s\n' "org.kde.plastik" "$(get_friendly_name decoration "org.kde.plastik")"
+        [[ -f "$plugin_dir/org.kde.kwin.aurorae.so" || -f "$plugin_dir/kwin_aurorae.so" ]] && printf '%s|%s\n' "org.kde.kwin.aurorae" "$(get_friendly_name decoration "org.kde.kwin.aurorae")"
         break
     done
 }
@@ -145,12 +183,10 @@ scan_splash_themes() {
             # Skip if already seen (user themes override system)
             [[ "$seen_ids" == *"|$id|"* ]] && continue
             seen_ids+="|$id|"
-            # Get friendly name from metadata.json
-            name=""
-            if [[ -f "${theme_dir}metadata.json" ]] && command -v jq &>/dev/null; then
-                name=$(jq -r '.KPlugin.Name // empty' "${theme_dir}metadata.json" 2>/dev/null)
-            fi
-            printf '%s|%s\n' "$id" "${name:-$id}"
+            
+            # Use centralized function for name
+            name=$(get_friendly_name splash "$id")
+            printf '%s|%s\n' "$id" "$name"
         done
     done | sort -t'|' -k2
 }
@@ -587,7 +623,9 @@ do_day() {
     local auto_mode
     auto_mode=$(kreadconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel)
 
-    echo -e "Switching to ☀️ Day theme: ${BOLD}$LAF_DAY${RESET}"
+    local friendly_name
+    friendly_name=$(get_friendly_name laf "$LAF_DAY")
+    echo -e "Switching to ☀️ Day theme: ${BOLD}$friendly_name${RESET} ($LAF_DAY)"
     plasma-apply-lookandfeel -a "$LAF_DAY"
 
     # Restore auto mode if it was enabled
@@ -607,7 +645,9 @@ do_night() {
     local auto_mode
     auto_mode=$(kreadconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel)
 
-    echo -e "Switching to 🌙 Night theme: ${BOLD}$LAF_NIGHT${RESET}"
+    local friendly_name
+    friendly_name=$(get_friendly_name laf "$LAF_NIGHT")
+    echo -e "Switching to 🌙 Night theme: ${BOLD}$friendly_name${RESET} ($LAF_NIGHT)"
     plasma-apply-lookandfeel -a "$LAF_NIGHT"
 
     # Restore auto mode if it was enabled
@@ -851,8 +891,8 @@ do_configure() {
     local laf_day laf_night
     laf_day=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel)
     laf_night=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel)
-    echo -e "  ☀️ Day theme: ${BOLD}$laf_day${RESET}"
-    echo -e "  🌙 Night theme:  ${BOLD}$laf_night${RESET}"
+    echo -e "  ☀️ Day theme: ${BOLD}$(get_friendly_name laf "$laf_day")${RESET} ($laf_day)"
+    echo -e "  🌙 Night theme:  ${BOLD}$(get_friendly_name laf "$laf_night")${RESET} ($laf_night)"
 
     if [[ "$laf_day" == "$laf_night" ]]; then
         echo -e "${RED}Error: ☀️ Day and 🌙 Night LookAndFeel are the same ($laf_day).${RESET}" >&2
@@ -1318,27 +1358,27 @@ do_configure() {
 
     echo ""
     echo "Configuration summary:"
-    echo -e "☀️ Day theme: ${BOLD}$laf_day${RESET}"
+    echo -e "☀️ Day theme: ${BOLD}$(get_friendly_name laf "$laf_day")${RESET} ($laf_day)"
     echo "    Kvantum: ${KVANTUM_DAY:-unchanged}"
     echo "    Style: ${STYLE_DAY:-unchanged}"
-    echo "    Decorations: ${DECORATION_DAY:-unchanged}"
+    echo "    Decorations: $(get_friendly_name decoration "${DECORATION_DAY:-}")"
     echo "    Colors: ${COLOR_DAY:-unchanged}"
     echo "    Icons: ${ICON_DAY:-unchanged}"
     echo "    Cursors: ${CURSOR_DAY:-unchanged}"
     echo "    GTK: ${GTK_DAY:-unchanged}"
     echo "    Konsole: ${KONSOLE_DAY:-unchanged}"
-    echo "    Splash: ${SPLASH_DAY:-unchanged}"
+    echo "    Splash: $(get_friendly_name splash "${SPLASH_DAY:-}")"
     echo "    Script: ${SCRIPT_DAY:-unchanged}"
-    echo -e "🌙 Night theme:  ${BOLD}$laf_night${RESET}"
+    echo -e "🌙 Night theme:  ${BOLD}$(get_friendly_name laf "$laf_night")${RESET} ($laf_night)"
     echo "    Kvantum: ${KVANTUM_NIGHT:-unchanged}"
     echo "    Style: ${STYLE_NIGHT:-unchanged}"
-    echo "    Decorations: ${DECORATION_NIGHT:-unchanged}"
+    echo "    Decorations: $(get_friendly_name decoration "${DECORATION_NIGHT:-}")"
     echo "    Colors: ${COLOR_NIGHT:-unchanged}"
     echo "    Icons: ${ICON_NIGHT:-unchanged}"
     echo "    Cursors: ${CURSOR_NIGHT:-unchanged}"
     echo "    GTK: ${GTK_NIGHT:-unchanged}"
     echo "    Konsole: ${KONSOLE_NIGHT:-unchanged}"
-    echo "    Splash: ${SPLASH_NIGHT:-unchanged}"
+    echo "    Splash: $(get_friendly_name splash "${SPLASH_NIGHT:-}")"
     echo "    Script: ${SCRIPT_NIGHT:-unchanged}"
 
     cat > "$CONFIG_FILE" <<EOF
@@ -1506,8 +1546,12 @@ do_remove() {
     if [[ -d "$laf_dir" ]]; then
         find "$laf_dir" -maxdepth 2 -name ".sync_managed" | while read -r flag; do
             theme_root=$(dirname "$flag")
+            local theme_id
+            theme_id=$(basename "$theme_root")
+            local friendly_name
+            friendly_name=$(get_friendly_name laf "$theme_id")
             rm -rf "$theme_root"
-            echo "Removed managed local theme: $(basename "$theme_root")"
+            echo "Removed managed local theme: ${BOLD}$friendly_name${RESET} ($theme_id)"
         done
         
         # Fallback for themes that were modified but not fully copied (restore .bak files)
@@ -1580,9 +1624,9 @@ do_status() {
 
     echo -e "${BOLD}Current mode:${RESET}"
     if [[ "$current_laf" == "$laf_day" ]]; then
-        echo "  ☀️ Day ($current_laf)"
+        echo "  ☀️ Day ($(get_friendly_name laf "$current_laf") - $current_laf)"
     elif [[ "$current_laf" == "$laf_night" ]]; then
-        echo "  🌙 Night ($current_laf)"
+        echo "  🌙 Night ($(get_friendly_name laf "$current_laf") - $current_laf)"
     else
         echo "  Unknown ($current_laf)"
     fi
@@ -1592,27 +1636,27 @@ do_status() {
         echo -e "${BOLD}Configuration ($CONFIG_FILE):${RESET}"
         # shellcheck source=/dev/null
         source "$CONFIG_FILE"
-        echo -e "☀️ Day theme: ${BOLD}$LAF_DAY${RESET}"
+        echo -e "☀️ Day theme: ${BOLD}$(get_friendly_name laf "$LAF_DAY")${RESET} ($LAF_DAY)"
         echo "    Kvantum: ${KVANTUM_DAY:-unchanged}"
         echo "    Style: ${STYLE_DAY:-unchanged}"
-        echo "    Decorations: ${DECORATION_DAY:-unchanged}"
+        echo "    Decorations: $(get_friendly_name decoration "${DECORATION_DAY:-}")"
         echo "    Colors: ${COLOR_DAY:-unchanged}"
         echo "    Icons: ${ICON_DAY:-unchanged}"
         echo "    Cursors: ${CURSOR_DAY:-unchanged}"
         echo "    GTK: ${GTK_DAY:-unchanged}"
         echo "    Konsole: ${KONSOLE_DAY:-unchanged}"
-        echo "    Splash: ${SPLASH_DAY:-unchanged}"
+        echo "    Splash: $(get_friendly_name splash "${SPLASH_DAY:-}")"
         echo "    Script: ${SCRIPT_DAY:-unchanged}"
-        echo -e "🌙 Night theme:  ${BOLD}$LAF_NIGHT${RESET}"
+        echo -e "🌙 Night theme:  ${BOLD}$(get_friendly_name laf "$LAF_NIGHT")${RESET} ($LAF_NIGHT)"
         echo "    Kvantum: ${KVANTUM_NIGHT:-unchanged}"
         echo "    Style: ${STYLE_NIGHT:-unchanged}"
-        echo "    Decorations: ${DECORATION_NIGHT:-unchanged}"
+        echo "    Decorations: $(get_friendly_name decoration "${DECORATION_NIGHT:-}")"
         echo "    Colors: ${COLOR_NIGHT:-unchanged}"
         echo "    Icons: ${ICON_NIGHT:-unchanged}"
         echo "    Cursors: ${CURSOR_NIGHT:-unchanged}"
         echo "    GTK: ${GTK_NIGHT:-unchanged}"
         echo "    Konsole: ${KONSOLE_NIGHT:-unchanged}"
-        echo "    Splash: ${SPLASH_NIGHT:-unchanged}"
+        echo "    Splash: $(get_friendly_name splash "${SPLASH_NIGHT:-}")"
         echo "    Script: ${SCRIPT_NIGHT:-unchanged}"
     else
         echo "Configuration: not installed"
