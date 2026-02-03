@@ -791,26 +791,26 @@ do_configure() {
 
         echo ""
         echo -e "${BOLD}Available splash themes:${RESET}"
-        printf "  ${BLUE}%3d)${RESET} %s\n" "1" "None (Disable splash screen)"
+        printf "  ${BLUE}%3d)${RESET} %s\n" "0" "None (Disable splash screen)"
         for i in "${!splash_names[@]}"; do
-            printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 2))" "${splash_names[$i]}"
+            printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${splash_names[$i]}"
         done
 
         echo ""
-        read -rp "Select ☀️ LIGHT mode splash theme [1-$(( ${#splash_ids[@]} + 1 ))]: " choice
-        if [[ "$choice" == "1" ]]; then
+        read -rp "Select ☀️ LIGHT mode splash theme [0-${#splash_ids[@]}]: " choice
+        if [[ "$choice" == "0" ]]; then
             SPLASH_LIGHT="None"
-        elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 2 && choice <= ${#splash_ids[@]} + 1 )); then
-            SPLASH_LIGHT="${splash_ids[$((choice - 2))]}"
+        elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#splash_ids[@]} )); then
+            SPLASH_LIGHT="${splash_ids[$((choice - 1))]}"
         else
             SPLASH_LIGHT=""
         fi
 
-        read -rp "Select 🌙 DARK mode splash theme [1-$(( ${#splash_ids[@]} + 1 ))]: " choice
-        if [[ "$choice" == "1" ]]; then
+        read -rp "Select 🌙 DARK mode splash theme [0-${#splash_ids[@]}]: " choice
+        if [[ "$choice" == "0" ]]; then
             SPLASH_DARK="None"
-        elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 2 && choice <= ${#splash_ids[@]} + 1 )); then
-            SPLASH_DARK="${splash_ids[$((choice - 2))]}"
+        elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#splash_ids[@]} )); then
+            SPLASH_DARK="${splash_ids[$((choice - 1))]}"
         else
             SPLASH_DARK=""
         fi
