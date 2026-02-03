@@ -209,16 +209,16 @@ get_laf() {
 }
 
 reload_laf_config() {
-    LAF_LIGHT=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel)
-    LAF_DARK=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel)
+    LAF_DAY=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel)
+    LAF_NIGHT=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel)
     # Silent reload as per request
 }
 
 apply_browser_color_scheme() {
-    local mode="$1"  # 'light' or 'dark'
+    local mode="$1"  # 'day' or 'night'
     local color_scheme portal_value
 
-    if [[ "$mode" == "dark" ]]; then
+    if [[ "$mode" == "night" ]]; then
         color_scheme="prefer-dark"
         portal_value=1
     else
@@ -356,34 +356,34 @@ refresh_kvantum_style() {
 
 apply_theme() {
     local laf="$1"
-    if [[ "$laf" == "$LAF_DARK" ]]; then
-        if [[ -n "$KVANTUM_DARK" ]]; then
-            kvantummanager --set "$KVANTUM_DARK"
+    if [[ "$laf" == "$LAF_NIGHT" ]]; then
+        if [[ -n "$KVANTUM_NIGHT" ]]; then
+            kvantummanager --set "$KVANTUM_NIGHT"
             refresh_kvantum_style "kvantum-dark"
         fi
-        [[ -n "$ICON_DARK" && -n "$PLASMA_CHANGEICONS" ]] && "$PLASMA_CHANGEICONS" "$ICON_DARK"
-        [[ -n "$GTK_DARK" ]] && apply_gtk_theme "$GTK_DARK"
-        [[ -n "$KONSOLE_DARK" ]] && apply_konsole_profile "$KONSOLE_DARK"
-        apply_splash "$SPLASH_DARK"
-        apply_browser_color_scheme "dark"
-        [[ -n "$SCRIPT_DARK" && -x "$SCRIPT_DARK" ]] && "$SCRIPT_DARK"
+        [[ -n "$ICON_NIGHT" && -n "$PLASMA_CHANGEICONS" ]] && "$PLASMA_CHANGEICONS" "$ICON_NIGHT"
+        [[ -n "$GTK_NIGHT" ]] && apply_gtk_theme "$GTK_NIGHT"
+        [[ -n "$KONSOLE_NIGHT" ]] && apply_konsole_profile "$KONSOLE_NIGHT"
+        apply_splash "$SPLASH_NIGHT"
+        apply_browser_color_scheme "night"
+        [[ -n "$SCRIPT_NIGHT" && -x "$SCRIPT_NIGHT" ]] && "$SCRIPT_NIGHT"
         dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh
-        echo "dark" > "${XDG_RUNTIME_DIR}/plasma-daynight-mode"
-        echo "[$(date)] Switched to 🌙 DARK mode"
-    elif [[ "$laf" == "$LAF_LIGHT" ]]; then
-        if [[ -n "$KVANTUM_LIGHT" ]]; then
-            kvantummanager --set "$KVANTUM_LIGHT"
+        echo "night" > "${XDG_RUNTIME_DIR}/plasma-daynight-mode"
+        echo "[$(date)] Switched to 🌙 NIGHT mode"
+    elif [[ "$laf" == "$LAF_DAY" ]]; then
+        if [[ -n "$KVANTUM_DAY" ]]; then
+            kvantummanager --set "$KVANTUM_DAY"
             refresh_kvantum_style "kvantum"
         fi
-        [[ -n "$ICON_LIGHT" && -n "$PLASMA_CHANGEICONS" ]] && "$PLASMA_CHANGEICONS" "$ICON_LIGHT"
-        [[ -n "$GTK_LIGHT" ]] && apply_gtk_theme "$GTK_LIGHT"
-        [[ -n "$KONSOLE_LIGHT" ]] && apply_konsole_profile "$KONSOLE_LIGHT"
-        apply_splash "$SPLASH_LIGHT"
-        apply_browser_color_scheme "light"
-        [[ -n "$SCRIPT_LIGHT" && -x "$SCRIPT_LIGHT" ]] && "$SCRIPT_LIGHT"
+        [[ -n "$ICON_DAY" && -n "$PLASMA_CHANGEICONS" ]] && "$PLASMA_CHANGEICONS" "$ICON_DAY"
+        [[ -n "$GTK_DAY" ]] && apply_gtk_theme "$GTK_DAY"
+        [[ -n "$KONSOLE_DAY" ]] && apply_konsole_profile "$KONSOLE_DAY"
+        apply_splash "$SPLASH_DAY"
+        apply_browser_color_scheme "day"
+        [[ -n "$SCRIPT_DAY" && -x "$SCRIPT_DAY" ]] && "$SCRIPT_DAY"
         dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh
-        echo "light" > "${XDG_RUNTIME_DIR}/plasma-daynight-mode"
-        echo "[$(date)] Switched to ☀️ LIGHT mode"
+        echo "day" > "${XDG_RUNTIME_DIR}/plasma-daynight-mode"
+        echo "[$(date)] Switched to ☀️ DAY mode"
     else
         echo "[$(date)] Unknown LookAndFeel: $laf — skipping"
     fi
@@ -425,14 +425,14 @@ load_config_strict() {
     source "$CONFIG_FILE"
 }
 
-do_light() {
-    [[ -z "${LAF_LIGHT:-}" ]] && load_config_strict
+do_day() {
+    [[ -z "${LAF_DAY:-}" ]] && load_config_strict
     # Save auto mode state before plasma-apply-lookandfeel disables it
     local auto_mode
     auto_mode=$(kreadconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel)
 
-    echo -e "Switching to ☀️ Light theme: ${BOLD}$LAF_LIGHT${RESET}"
-    plasma-apply-lookandfeel -a "$LAF_LIGHT"
+    echo -e "Switching to ☀️ Day theme: ${BOLD}$LAF_DAY${RESET}"
+    plasma-apply-lookandfeel -a "$LAF_DAY"
 
     # Restore auto mode if it was enabled
     if [[ "$auto_mode" == "true" ]]; then
@@ -441,18 +441,18 @@ do_light() {
 
     # If watcher is not running, manually sync sub-themes
     if ! systemctl --user is-active --quiet "$SERVICE_NAME"; then
-         apply_theme "$LAF_LIGHT"
+         apply_theme "$LAF_DAY"
     fi
 }
 
-do_dark() {
-    [[ -z "${LAF_DARK:-}" ]] && load_config_strict
+do_night() {
+    [[ -z "${LAF_NIGHT:-}" ]] && load_config_strict
     # Save auto mode state before plasma-apply-lookandfeel disables it
     local auto_mode
     auto_mode=$(kreadconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel)
 
-    echo -e "Switching to 🌙 Dark theme: ${BOLD}$LAF_DARK${RESET}"
-    plasma-apply-lookandfeel -a "$LAF_DARK"
+    echo -e "Switching to 🌙 Night theme: ${BOLD}$LAF_NIGHT${RESET}"
+    plasma-apply-lookandfeel -a "$LAF_NIGHT"
 
     # Restore auto mode if it was enabled
     if [[ "$auto_mode" == "true" ]]; then
@@ -461,7 +461,7 @@ do_dark() {
 
     # If watcher is not running, manually sync sub-themes
     if ! systemctl --user is-active --quiet "$SERVICE_NAME"; then
-         apply_theme "$LAF_DARK"
+         apply_theme "$LAF_NIGHT"
     fi
 }
 
@@ -470,10 +470,10 @@ do_toggle() {
     local current_laf
     current_laf=$(kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage)
 
-    if [[ "$current_laf" == "$LAF_DARK" ]]; then
-        do_light
+    if [[ "$current_laf" == "$LAF_NIGHT" ]]; then
+        do_day
     else
-        do_dark
+        do_night
     fi
 }
 
@@ -551,16 +551,16 @@ do_configure() {
         cleanup_stale
     fi
 
-    # Read light/dark themes from KDE Quick Settings configuration
+    # Read day/night themes from KDE Quick Settings configuration
     echo -e "${BLUE}Reading theme configuration from KDE settings...${RESET}"
-    local laf_light laf_dark
-    laf_light=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel)
-    laf_dark=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel)
-    echo -e "  ☀️ Light theme: ${BOLD}$laf_light${RESET}"
-    echo -e "  🌙 Dark theme:  ${BOLD}$laf_dark${RESET}"
+    local laf_day laf_night
+    laf_day=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel)
+    laf_night=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel)
+    echo -e "  ☀️ Day theme: ${BOLD}$laf_day${RESET}"
+    echo -e "  🌙 Night theme:  ${BOLD}$laf_night${RESET}"
 
-    if [[ "$laf_light" == "$laf_dark" ]]; then
-        echo -e "${RED}Error: ☀️ Light and 🌙 Dark LookAndFeel are the same ($laf_light).${RESET}" >&2
+    if [[ "$laf_day" == "$laf_night" ]]; then
+        echo -e "${RED}Error: ☀️ Day and 🌙 Night LookAndFeel are the same ($laf_day).${RESET}" >&2
         echo "Configure different themes in System Settings > Colors & Themes > Global Theme." >&2
         exit 1
     fi
@@ -576,8 +576,8 @@ do_configure() {
 
         if [[ ${#themes[@]} -eq 0 ]]; then
             echo "No Kvantum themes found, skipping."
-            KVANTUM_LIGHT=""
-            KVANTUM_DARK=""
+            KVANTUM_DAY=""
+            KVANTUM_NIGHT=""
         else
             echo ""
             echo -e "${BOLD}Available Kvantum themes:${RESET}"
@@ -586,25 +586,25 @@ do_configure() {
             done
 
             echo ""
-            read -rp "Select ☀️ LIGHT mode Kvantum theme [1-${#themes[@]}]: " choice
+            read -rp "Select ☀️ DAY mode Kvantum theme [1-${#themes[@]}]: " choice
             if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#themes[@]} )); then
-                KVANTUM_LIGHT="${themes[$((choice - 1))]}"
+                KVANTUM_DAY="${themes[$((choice - 1))]}"
 
-                read -rp "Select 🌙 DARK mode Kvantum theme [1-${#themes[@]}]: " choice
+                read -rp "Select 🌙 NIGHT mode Kvantum theme [1-${#themes[@]}]: " choice
                 if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#themes[@]} )); then
-                    KVANTUM_DARK="${themes[$((choice - 1))]}"
+                    KVANTUM_NIGHT="${themes[$((choice - 1))]}"
                 else
-                    KVANTUM_LIGHT=""
-                    KVANTUM_DARK=""
+                    KVANTUM_DAY=""
+                    KVANTUM_NIGHT=""
                 fi
             else
-                KVANTUM_LIGHT=""
-                KVANTUM_DARK=""
+                KVANTUM_DAY=""
+                KVANTUM_NIGHT=""
             fi
         fi
     else
-        KVANTUM_LIGHT=""
-        KVANTUM_DARK=""
+        KVANTUM_DAY=""
+        KVANTUM_NIGHT=""
     fi
     fi
 
@@ -634,8 +634,8 @@ do_configure() {
 
         if [[ ${#icon_themes[@]} -eq 0 ]]; then
             echo "No icon themes found, skipping."
-            ICON_LIGHT=""
-            ICON_DARK=""
+            ICON_DAY=""
+            ICON_NIGHT=""
         else
             echo ""
             echo -e "${BOLD}Available icon themes:${RESET}"
@@ -644,13 +644,13 @@ do_configure() {
             done
 
             echo ""
-            read -rp "Select ☀️ LIGHT mode icon theme [1-${#icon_themes[@]}]: " choice
+            read -rp "Select ☀️ DAY mode icon theme [1-${#icon_themes[@]}]: " choice
             if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#icon_themes[@]} )); then
-                ICON_LIGHT="${icon_themes[$((choice - 1))]}"
+                ICON_DAY="${icon_themes[$((choice - 1))]}"
 
-                read -rp "Select 🌙 DARK mode icon theme [1-${#icon_themes[@]}]: " choice
+                read -rp "Select 🌙 NIGHT mode icon theme [1-${#icon_themes[@]}]: " choice
                 if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#icon_themes[@]} )); then
-                    ICON_DARK="${icon_themes[$((choice - 1))]}"
+                    ICON_NIGHT="${icon_themes[$((choice - 1))]}"
 
                     # Offer to update look-and-feel defaults
                     echo ""
@@ -659,28 +659,28 @@ do_configure() {
                     echo -e "${YELLOW}Warning:${RESET} This change won't persist if you reinstall/update the themes."
                     read -rp "Update look-and-feel themes with these icon packs? [y/N]: " choice
                     if [[ "$choice" =~ ^[Yy]$ ]]; then
-                        update_laf_icons "$laf_light" "$ICON_LIGHT" && \
-                            echo -e "  ${GREEN}✓${RESET} Updated $laf_light with $ICON_LIGHT"
-                        update_laf_icons "$laf_dark" "$ICON_DARK" && \
-                            echo -e "  ${GREEN}✓${RESET} Updated $laf_dark with $ICON_DARK"
+                        update_laf_icons "$laf_day" "$ICON_DAY" && \
+                            echo -e "  ${GREEN}✓${RESET} Updated $laf_day with $ICON_DAY"
+                        update_laf_icons "$laf_night" "$ICON_NIGHT" && \
+                            echo -e "  ${GREEN}✓${RESET} Updated $laf_night with $ICON_NIGHT"
                         # Clear icon config since LAF will handle it
-                        ICON_LIGHT=""
-                        ICON_DARK=""
+                        ICON_DAY=""
+                        ICON_NIGHT=""
                         PLASMA_CHANGEICONS=""
                         echo "Icon switching will now be handled by the look-and-feel themes."
                     fi
                 else
-                    ICON_LIGHT=""
-                    ICON_DARK=""
+                    ICON_DAY=""
+                    ICON_NIGHT=""
                 fi
             else
-                ICON_LIGHT=""
-                ICON_DARK=""
+                ICON_DAY=""
+                ICON_NIGHT=""
             fi
         fi
     else
-        ICON_LIGHT=""
-        ICON_DARK=""
+        ICON_DAY=""
+        ICON_NIGHT=""
         PLASMA_CHANGEICONS=""
     fi
     fi
@@ -695,8 +695,8 @@ do_configure() {
 
         if [[ ${#gtk_themes[@]} -eq 0 ]]; then
             echo "No GTK themes found, skipping."
-            GTK_LIGHT=""
-            GTK_DARK=""
+            GTK_DAY=""
+            GTK_NIGHT=""
         else
             echo ""
             echo -e "${BOLD}Available GTK themes:${RESET}"
@@ -705,25 +705,25 @@ do_configure() {
             done
 
             echo ""
-            read -rp "Select ☀️ LIGHT mode GTK theme [1-${#gtk_themes[@]}]: " choice
+            read -rp "Select ☀️ DAY mode GTK theme [1-${#gtk_themes[@]}]: " choice
             if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#gtk_themes[@]} )); then
-                GTK_LIGHT="${gtk_themes[$((choice - 1))]}"
+                GTK_DAY="${gtk_themes[$((choice - 1))]}"
 
-                read -rp "Select 🌙 DARK mode GTK theme [1-${#gtk_themes[@]}]: " choice
+                read -rp "Select 🌙 NIGHT mode GTK theme [1-${#gtk_themes[@]}]: " choice
                 if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#gtk_themes[@]} )); then
-                    GTK_DARK="${gtk_themes[$((choice - 1))]}"
+                    GTK_NIGHT="${gtk_themes[$((choice - 1))]}"
                 else
-                    GTK_LIGHT=""
-                    GTK_DARK=""
+                    GTK_DAY=""
+                    GTK_NIGHT=""
                 fi
             else
-                GTK_LIGHT=""
-                GTK_DARK=""
+                GTK_DAY=""
+                GTK_NIGHT=""
             fi
         fi
     else
-        GTK_LIGHT=""
-        GTK_DARK=""
+        GTK_DAY=""
+        GTK_NIGHT=""
     fi
     fi
 
@@ -737,8 +737,8 @@ do_configure() {
 
         if [[ ${#konsole_profiles[@]} -eq 0 ]]; then
             echo "No Konsole profiles found, skipping."
-            KONSOLE_LIGHT=""
-            KONSOLE_DARK=""
+            KONSOLE_DAY=""
+            KONSOLE_NIGHT=""
         else
             echo ""
             echo -e "${BOLD}Available Konsole profiles:${RESET}"
@@ -747,25 +747,25 @@ do_configure() {
             done
 
             echo ""
-            read -rp "Select ☀️ LIGHT mode Konsole profile [1-${#konsole_profiles[@]}]: " choice
+            read -rp "Select ☀️ DAY mode Konsole profile [1-${#konsole_profiles[@]}]: " choice
             if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#konsole_profiles[@]} )); then
-                KONSOLE_LIGHT="${konsole_profiles[$((choice - 1))]}"
+                KONSOLE_DAY="${konsole_profiles[$((choice - 1))]}"
 
-                read -rp "Select 🌙 DARK mode Konsole profile [1-${#konsole_profiles[@]}]: " choice
+                read -rp "Select 🌙 NIGHT mode Konsole profile [1-${#konsole_profiles[@]}]: " choice
                 if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#konsole_profiles[@]} )); then
-                    KONSOLE_DARK="${konsole_profiles[$((choice - 1))]}"
+                    KONSOLE_NIGHT="${konsole_profiles[$((choice - 1))]}"
                 else
-                    KONSOLE_LIGHT=""
-                    KONSOLE_DARK=""
+                    KONSOLE_DAY=""
+                    KONSOLE_NIGHT=""
                 fi
             else
-                KONSOLE_LIGHT=""
-                KONSOLE_DARK=""
+                KONSOLE_DAY=""
+                KONSOLE_NIGHT=""
             fi
         fi
     else
-        KONSOLE_LIGHT=""
-        KONSOLE_DARK=""
+        KONSOLE_DAY=""
+        KONSOLE_NIGHT=""
     fi
     fi
 
@@ -789,26 +789,26 @@ do_configure() {
         done
 
         echo ""
-        read -rp "Select ☀️ LIGHT mode splash theme [0-${#splash_ids[@]}]: " choice
+        read -rp "Select ☀️ DAY mode splash theme [0-${#splash_ids[@]}]: " choice
         if [[ "$choice" == "0" ]]; then
-            SPLASH_LIGHT="None"
+            SPLASH_DAY="None"
         elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#splash_ids[@]} )); then
-            SPLASH_LIGHT="${splash_ids[$((choice - 1))]}"
+            SPLASH_DAY="${splash_ids[$((choice - 1))]}"
         else
-            SPLASH_LIGHT=""
+            SPLASH_DAY=""
         fi
 
-        read -rp "Select 🌙 DARK mode splash theme [0-${#splash_ids[@]}]: " choice
+        read -rp "Select 🌙 NIGHT mode splash theme [0-${#splash_ids[@]}]: " choice
         if [[ "$choice" == "0" ]]; then
-            SPLASH_DARK="None"
+            SPLASH_NIGHT="None"
         elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#splash_ids[@]} )); then
-            SPLASH_DARK="${splash_ids[$((choice - 1))]}"
+            SPLASH_NIGHT="${splash_ids[$((choice - 1))]}"
         else
-            SPLASH_DARK=""
+            SPLASH_NIGHT=""
         fi
     else
-        SPLASH_LIGHT=""
-        SPLASH_DARK=""
+        SPLASH_DAY=""
+        SPLASH_NIGHT=""
     fi
     fi
 
@@ -818,23 +818,23 @@ do_configure() {
     read -rp "Configure custom scripts? [y/N]: " choice
     if [[ "$choice" =~ ^[Yy]$ ]]; then
         echo ""
-        read -rp "Enter ☀️ LIGHT mode script path (leave empty to skip): " SCRIPT_LIGHT
-        if [[ -n "$SCRIPT_LIGHT" && ! -x "$SCRIPT_LIGHT" ]]; then
-            echo "Warning: $SCRIPT_LIGHT is not executable" >&2
+        read -rp "Enter ☀️ DAY mode script path (leave empty to skip): " SCRIPT_DAY
+        if [[ -n "$SCRIPT_DAY" && ! -x "$SCRIPT_DAY" ]]; then
+            echo "Warning: $SCRIPT_DAY is not executable" >&2
         fi
 
-        read -rp "Enter 🌙 DARK mode script path (leave empty to skip): " SCRIPT_DARK
-        if [[ -n "$SCRIPT_DARK" && ! -x "$SCRIPT_DARK" ]]; then
-            echo "Warning: $SCRIPT_DARK is not executable" >&2
+        read -rp "Enter 🌙 NIGHT mode script path (leave empty to skip): " SCRIPT_NIGHT
+        if [[ -n "$SCRIPT_NIGHT" && ! -x "$SCRIPT_NIGHT" ]]; then
+            echo "Warning: $SCRIPT_NIGHT is not executable" >&2
         fi
     else
-        SCRIPT_LIGHT=""
-        SCRIPT_DARK=""
+        SCRIPT_DAY=""
+        SCRIPT_NIGHT=""
     fi
     fi
 
     # Check if anything was configured
-    if [[ -z "$KVANTUM_LIGHT" && -z "$KVANTUM_DARK" && -z "$ICON_LIGHT" && -z "$ICON_DARK" && -z "$GTK_LIGHT" && -z "$GTK_DARK" && -z "$KONSOLE_LIGHT" && -z "$KONSOLE_DARK" && -z "$SCRIPT_LIGHT" && -z "$SCRIPT_DARK" && -z "$SPLASH_LIGHT" && -z "$SPLASH_DARK" ]]; then
+    if [[ -z "$KVANTUM_DAY" && -z "$KVANTUM_NIGHT" && -z "$ICON_DAY" && -z "$ICON_NIGHT" && -z "$GTK_DAY" && -z "$GTK_NIGHT" && -z "$KONSOLE_DAY" && -z "$KONSOLE_NIGHT" && -z "$SCRIPT_DAY" && -z "$SCRIPT_NIGHT" && -z "$SPLASH_DAY" && -z "$SPLASH_NIGHT" ]]; then
         echo ""
         echo "Nothing to configure. Exiting."
         exit 0
@@ -842,37 +842,37 @@ do_configure() {
 
     echo ""
     echo "Configuration summary:"
-    echo -e "☀️ Light theme: ${BOLD}$laf_light${RESET}"
-    echo "    Kvantum: ${KVANTUM_LIGHT:-unchanged}"
-    echo "    Icons: ${ICON_LIGHT:-unchanged}"
-    echo "    GTK: ${GTK_LIGHT:-unchanged}"
-    echo "    Konsole: ${KONSOLE_LIGHT:-unchanged}"
-    echo "    Splash: ${SPLASH_LIGHT:-unchanged}"
-    echo "    Script: ${SCRIPT_LIGHT:-unchanged}"
-    echo -e "🌙 Dark theme:  ${BOLD}$laf_dark${RESET}"
-    echo "    Kvantum: ${KVANTUM_DARK:-unchanged}"
-    echo "    Icons: ${ICON_DARK:-unchanged}"
-    echo "    GTK: ${GTK_DARK:-unchanged}"
-    echo "    Konsole: ${KONSOLE_DARK:-unchanged}"
-    echo "    Splash: ${SPLASH_DARK:-unchanged}"
-    echo "    Script: ${SCRIPT_DARK:-unchanged}"
+    echo -e "☀️ Day theme: ${BOLD}$laf_day${RESET}"
+    echo "    Kvantum: ${KVANTUM_DAY:-unchanged}"
+    echo "    Icons: ${ICON_DAY:-unchanged}"
+    echo "    GTK: ${GTK_DAY:-unchanged}"
+    echo "    Konsole: ${KONSOLE_DAY:-unchanged}"
+    echo "    Splash: ${SPLASH_DAY:-unchanged}"
+    echo "    Script: ${SCRIPT_DAY:-unchanged}"
+    echo -e "🌙 Night theme:  ${BOLD}$laf_night${RESET}"
+    echo "    Kvantum: ${KVANTUM_NIGHT:-unchanged}"
+    echo "    Icons: ${ICON_NIGHT:-unchanged}"
+    echo "    GTK: ${GTK_NIGHT:-unchanged}"
+    echo "    Konsole: ${KONSOLE_NIGHT:-unchanged}"
+    echo "    Splash: ${SPLASH_NIGHT:-unchanged}"
+    echo "    Script: ${SCRIPT_NIGHT:-unchanged}"
 
     cat > "$CONFIG_FILE" <<EOF
-LAF_LIGHT=$laf_light
-LAF_DARK=$laf_dark
-KVANTUM_LIGHT=$KVANTUM_LIGHT
-KVANTUM_DARK=$KVANTUM_DARK
-ICON_LIGHT=$ICON_LIGHT
-ICON_DARK=$ICON_DARK
+LAF_DAY=$laf_day
+LAF_NIGHT=$laf_night
+KVANTUM_DAY=$KVANTUM_DAY
+KVANTUM_NIGHT=$KVANTUM_NIGHT
+ICON_DAY=$ICON_DAY
+ICON_NIGHT=$ICON_NIGHT
 PLASMA_CHANGEICONS=$PLASMA_CHANGEICONS
-GTK_LIGHT=$GTK_LIGHT
-GTK_DARK=$GTK_DARK
-KONSOLE_LIGHT=$KONSOLE_LIGHT
-KONSOLE_DARK=$KONSOLE_DARK
-SPLASH_LIGHT=$SPLASH_LIGHT
-SPLASH_DARK=$SPLASH_DARK
-SCRIPT_LIGHT=$SCRIPT_LIGHT
-SCRIPT_DARK=$SCRIPT_DARK
+GTK_DAY=$GTK_DAY
+GTK_NIGHT=$GTK_NIGHT
+KONSOLE_DAY=$KONSOLE_DAY
+KONSOLE_NIGHT=$KONSOLE_NIGHT
+SPLASH_DAY=$SPLASH_DAY
+SPLASH_NIGHT=$SPLASH_NIGHT
+SCRIPT_DAY=$SCRIPT_DAY
+SCRIPT_NIGHT=$SCRIPT_NIGHT
 EOF
 
     # Install globally?
@@ -1049,15 +1049,15 @@ do_status() {
     echo ""
     local current_laf
     current_laf=$(kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage 2>/dev/null)
-    local laf_light laf_dark
-    laf_light=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel 2>/dev/null)
-    laf_dark=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel 2>/dev/null)
+    local laf_day laf_night
+    laf_day=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel 2>/dev/null)
+    laf_night=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel 2>/dev/null)
 
     echo -e "${BOLD}Current mode:${RESET}"
-    if [[ "$current_laf" == "$laf_light" ]]; then
-        echo "  ☀️ Light ($current_laf)"
-    elif [[ "$current_laf" == "$laf_dark" ]]; then
-        echo "  🌙 Dark ($current_laf)"
+    if [[ "$current_laf" == "$laf_day" ]]; then
+        echo "  ☀️ Day ($current_laf)"
+    elif [[ "$current_laf" == "$laf_night" ]]; then
+        echo "  🌙 Night ($current_laf)"
     else
         echo "  Unknown ($current_laf)"
     fi
@@ -1067,20 +1067,20 @@ do_status() {
         echo -e "${BOLD}Configuration ($CONFIG_FILE):${RESET}"
         # shellcheck source=/dev/null
         source "$CONFIG_FILE"
-        echo -e "☀️ Light theme: ${BOLD}$LAF_LIGHT${RESET}"
-        echo "    Kvantum: ${KVANTUM_LIGHT:-unchanged}"
-        echo "    Icons: ${ICON_LIGHT:-unchanged}"
-        echo "    GTK: ${GTK_LIGHT:-unchanged}"
-        echo "    Konsole: ${KONSOLE_LIGHT:-unchanged}"
-        echo "    Splash: ${SPLASH_LIGHT:-unchanged}"
-        echo "    Script: ${SCRIPT_LIGHT:-unchanged}"
-        echo -e "🌙 Dark theme:  ${BOLD}$LAF_DARK${RESET}"
-        echo "    Kvantum: ${KVANTUM_DARK:-unchanged}"
-        echo "    Icons: ${ICON_DARK:-unchanged}"
-        echo "    GTK: ${GTK_DARK:-unchanged}"
-        echo "    Konsole: ${KONSOLE_DARK:-unchanged}"
-        echo "    Splash: ${SPLASH_DARK:-unchanged}"
-        echo "    Script: ${SCRIPT_DARK:-unchanged}"
+        echo -e "☀️ Day theme: ${BOLD}$LAF_DAY${RESET}"
+        echo "    Kvantum: ${KVANTUM_DAY:-unchanged}"
+        echo "    Icons: ${ICON_DAY:-unchanged}"
+        echo "    GTK: ${GTK_DAY:-unchanged}"
+        echo "    Konsole: ${KONSOLE_DAY:-unchanged}"
+        echo "    Splash: ${SPLASH_DAY:-unchanged}"
+        echo "    Script: ${SCRIPT_DAY:-unchanged}"
+        echo -e "🌙 Night theme:  ${BOLD}$LAF_NIGHT${RESET}"
+        echo "    Kvantum: ${KVANTUM_NIGHT:-unchanged}"
+        echo "    Icons: ${ICON_NIGHT:-unchanged}"
+        echo "    GTK: ${GTK_NIGHT:-unchanged}"
+        echo "    Konsole: ${KONSOLE_NIGHT:-unchanged}"
+        echo "    Splash: ${SPLASH_NIGHT:-unchanged}"
+        echo "    Script: ${SCRIPT_NIGHT:-unchanged}"
     else
         echo "Configuration: not installed"
     fi
@@ -1095,9 +1095,9 @@ Usage: $0 <command> [options]
 Commands:
   configure    Scan themes, save config, enable systemd service
   watch        Start the theme monitoring loop (foreground)
-  light        Switch to Light mode (and sync sub-themes)
-  dark         Switch to Dark mode (and sync sub-themes)
-  toggle       Toggle between Light and Dark mode
+  day          Switch to Day mode (and sync sub-themes)
+  night        Switch to Night mode (and sync sub-themes)
+  toggle       Toggle between Day and Night mode
   remove       Stop service, remove all installed files and widget
   status       Show service status and current configuration
   help         Show this help message
@@ -1132,8 +1132,8 @@ EOF
 case "${1:-}" in
     configure) do_configure "$@" ;;
     watch)     do_watch ;;
-    light)     do_light ;;
-    dark)      do_dark ;;
+    day)       do_day ;;
+    night)     do_night ;;
     toggle)    do_toggle ;;
     remove)    do_remove ;;
     status)    do_status ;;

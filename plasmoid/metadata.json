@@ -8,7 +8,7 @@
             }
         ],
         "Category": "Utilities",
-        "Description": "Toggle between light and dark themes",
+        "Description": "Toggle between day and night themes",
         "Icon": "weather-clear",
         "Id": "org.kde.plasma.daynighttoggle",
         "License": "GPL-3.0",

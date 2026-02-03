@@ -21,7 +21,7 @@ PlasmoidItem {
         || Plasmoid.location === PlasmaCore.Types.LeftEdge)
 
     Plasmoid.icon: isDarkMode ? "weather-clear-night" : "weather-clear"
-    toolTipMainText: isDarkMode ? "Dark Mode" : "Light Mode"
+    toolTipMainText: isDarkMode ? "Night Mode" : "Day Mode"
     toolTipSubText: "Click to toggle"
 
     Plasmoid.onActivated: toggleMode()
@@ -39,9 +39,9 @@ PlasmoidItem {
 
         onNewData: (sourceName, data) => {
             var mode = data["stdout"].trim()
-            if (mode === "dark") {
+            if (mode === "night") {
                 root.isDarkMode = true
-            } else if (mode === "light") {
+            } else if (mode === "day") {
                 root.isDarkMode = false
             }
             root.isRunning = false
@@ -78,9 +78,9 @@ PlasmoidItem {
         if (isRunning) return
         isRunning = true
         if (isDarkMode) {
-            toggleRunner.connectSource("plasma-daynight-sync light")
+            toggleRunner.connectSource("plasma-daynight-sync day")
         } else {
-            toggleRunner.connectSource("plasma-daynight-sync dark")
+            toggleRunner.connectSource("plasma-daynight-sync night")
         }
     }
 

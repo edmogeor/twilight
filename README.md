@@ -4,7 +4,7 @@
   <img src="screenshots/example.gif" width="800" />
 </div>
 
-**Plasma Day/Night Sync** is a robust theme switcher for the KDE Plasma desktop environment. It hooks into KDE's built-in Light/Dark mode switcher to automatically synchronize theme components that otherwise wouldn't get switched, such as Kvantum themes, GTK themes, Icon sets, Konsole profiles, and even custom scripts.
+**Plasma Day/Night Sync** is a robust theme switcher for the KDE Plasma desktop environment. It hooks into KDE's built-in Day/Night mode switcher to automatically synchronize theme components that otherwise wouldn't get switched, such as Kvantum themes, GTK themes, Icon sets, Konsole profiles, and even custom scripts.
 
 It runs as a background service (systemd user unit) to ensure your desktop experience is consistent whenever you toggle the global theme via Quick Settings or when KDE switches the theme automatically.
 
@@ -12,10 +12,10 @@ It runs as a background service (systemd user unit) to ensure your desktop exper
 
 -   **Kvantum Integration:** Automatically switches Kvantum themes (useful for application styling).
 -   **GTK Theme Sync:** Updates GTK 3/4 themes to match your Plasma preference.
--   **Icon Theme Sync:** Changes icon packs for Light/Dark modes.
+-   **Icon Theme Sync:** Changes icon packs for Day/Night modes.
 -   **Konsole Profiles:** Switches Konsole profiles live for running instances and new windows.
 -   **Splash Screen:** Optionally overrides or changes the splash screen.
--   **Custom Scripts:** Run arbitrary scripts when switching to Light or Dark mode.
+-   **Custom Scripts:** Run arbitrary scripts when switching to Day or Night mode.
 -   **Systemd Service:** Installs a user-level systemd service to watch for changes automatically.
 -   **Panel Widget:** Optional Day/Night Toggle widget for your panel.
 -   **Keyboard Shortcut:** Toggle themes with Meta+Shift+L (customizable in System Settings > Shortcuts).
@@ -51,8 +51,8 @@ This patches `plasma-integration` to add a DBus signal that forces Qt apps to re
 
 The `configure` command will:
 -   Scan your system for available Kvantum themes, GTK themes, Icons, etc.
--   Ask you to select which ones to use for **Light Mode** and **Dark Mode**.
--   Detect your current Plasma Light/Dark global themes.
+-   Ask you to select which ones to use for **Day Mode** and **Night Mode**.
+-   Detect your current Plasma Day/Night global themes.
 -   Install the script to `~/.local/bin/` (optional).
 -   Install the Day/Night Toggle panel widget (optional).
 -   Add a keyboard shortcut (Meta+Shift+L) for quick toggling (optional).
@@ -82,15 +82,15 @@ Once configured and installed, the service runs in the background. You usually d
 | :--- | :--- |
 | `plasma-daynight-sync configure` | Run the setup wizard. |
 | `plasma-daynight-sync status` | Show the service status and current theme configuration. |
-| `plasma-daynight-sync light` | Manually force **Light Mode** (and sync all sub-themes). |
-| `plasma-daynight-sync dark` | Manually force **Dark Mode** (and sync all sub-themes). |
-| `plasma-daynight-sync toggle` | Toggle between Light and Dark modes (also via Meta+Shift+L). |
+| `plasma-daynight-sync day` | Manually force **Day Mode** (and sync all sub-themes). |
+| `plasma-daynight-sync night` | Manually force **Night Mode** (and sync all sub-themes). |
+| `plasma-daynight-sync toggle` | Toggle between Day and Night modes (also via Meta+Shift+L). |
 | `plasma-daynight-sync remove` | Stop the service and remove all configuration/installed files. |
 | `plasma-daynight-sync watch` | Run the monitor in the foreground (used by the service). |
 
 ## How it works
 
-1.  The script reads your KDE global configuration to determine your preferred "Light" and "Dark" Global Themes (Look and Feel packages).
+1.  The script reads your KDE global configuration to determine your preferred "Day" and "Night" Global Themes (Look and Feel packages).
 2.  It uses `inotifywait` to monitor `~/.config/kdeglobals` for changes.
 3.  When you switch your Global Theme in System Settings (or via the Quick Settings widget), the script detects the change.
 4.  It immediately applies the corresponding Kvantum theme, GTK theme, Icons, etc., that you selected during `configure`.
