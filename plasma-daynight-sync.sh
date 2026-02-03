@@ -26,6 +26,8 @@ SERVICE_FILE="${SERVICE_DIR}/${SERVICE_NAME}.service"
 CLI_PATH="${HOME}/.local/bin/plasma-daynight-sync"
 PLASMOID_ID="org.kde.plasma.daynighttoggle"
 PLASMOID_INSTALL_DIR="${HOME}/.local/share/plasma/plasmoids/${PLASMOID_ID}"
+DESKTOP_FILE="${HOME}/.local/share/applications/plasma-daynight-toggle.desktop"
+SHORTCUT_ID="plasma-daynight-toggle.desktop"
 
 scan_kvantum_themes() {
     local themes=()
@@ -115,6 +117,38 @@ remove_plasmoid() {
     if [[ -d "$PLASMOID_INSTALL_DIR" ]]; then
         rm -rf "$PLASMOID_INSTALL_DIR"
         echo "Removed Day/Night Toggle widget"
+    fi
+}
+
+install_shortcut() {
+    # Create .desktop file for the toggle command (appears in Commands section of System Settings > Shortcuts)
+    mkdir -p "$(dirname "$DESKTOP_FILE")"
+    cat > "$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Toggle Day/Night Theme
+Exec=plasma-daynight-sync toggle
+NoDisplay=true
+StartupNotify=false
+X-KDE-GlobalAccel-CommandShortcut=true
+EOF
+
+    # Register the shortcut with KDE (Meta+Shift+L)
+    kwriteconfig6 --file kglobalshortcutsrc --group "services" --group "$SHORTCUT_ID" --key "_launch" "Meta+Shift+L"
+
+    echo -e "${GREEN}Keyboard shortcut installed: Meta+Shift+L${RESET}"
+    echo "You can change it in System Settings > Shortcuts > Commands"
+}
+
+remove_shortcut() {
+    if [[ -f "$DESKTOP_FILE" ]]; then
+        rm -f "$DESKTOP_FILE"
+        echo "Removed shortcut desktop file"
+    fi
+    # Remove from kglobalshortcutsrc
+    if grep -q "$SHORTCUT_ID" "${HOME}/.config/kglobalshortcutsrc" 2>/dev/null; then
+        kwriteconfig6 --file kglobalshortcutsrc --group "services" --group "$SHORTCUT_ID" --delete-group
+        echo "Removed keyboard shortcut"
     fi
 }
 
@@ -800,12 +834,19 @@ EOF
         if [[ "$choice" =~ ^[Yy]$ ]]; then
             install_plasmoid
         fi
+
+        # Offer to install keyboard shortcut
+        echo ""
+        read -rp "Do you want to add a keyboard shortcut (Meta+Shift+L) to toggle themes? [y/N]: " choice
+        if [[ "$choice" =~ ^[Yy]$ ]]; then
+            install_shortcut
+        fi
     else
         # Use absolute path of current script
         executable_path=$(readlink -f "$0")
         echo ""
-        echo -e "${YELLOW}Note:${RESET} The Day/Night Toggle panel widget requires the command to be installed globally."
-        echo "Run configure again and choose 'yes' for global installation to enable the widget."
+        echo -e "${YELLOW}Note:${RESET} The panel widget and keyboard shortcut require the command to be installed globally."
+        echo "Run configure again and choose 'yes' for global installation to enable these features."
     fi
 
     # Install systemd service
@@ -881,6 +922,9 @@ do_remove() {
     # Remove plasmoid if installed
     remove_plasmoid
 
+    # Remove keyboard shortcut if installed
+    remove_shortcut
+
     if [[ "$removed" -eq 1 ]]; then
         systemctl --user daemon-reload
     fi
@@ -904,6 +948,11 @@ do_status() {
         echo -e "    Panel widget: ${GREEN}installed${RESET}"
     else
         echo -e "    Panel widget: ${YELLOW}not installed${RESET}"
+    fi
+    if [[ -f "$DESKTOP_FILE" ]]; then
+        echo -e "    Keyboard shortcut: ${GREEN}installed${RESET} (Meta+Shift+L)"
+    else
+        echo -e "    Keyboard shortcut: ${YELLOW}not installed${RESET}"
     fi
 
     echo ""
