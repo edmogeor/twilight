@@ -221,6 +221,9 @@ update_laf_icons() {
         local system_laf_root="/usr/share/plasma/look-and-feel/${laf}"
         cp "${system_laf_root}/metadata."* "$laf_root/" 2>/dev/null || true
 
+        # Add managed flag so we can safely delete this on removal
+        touch "${laf_root}/.sync_managed"
+
         # Copy previews (so the theme looks correct in System Settings)
         if [[ -d "${system_laf_root}/contents/previews" ]]; then
             cp -r "${system_laf_root}/contents/previews" "$user_contents/"
@@ -748,9 +751,16 @@ do_remove() {
         systemctl --user disable "$SERVICE_NAME"
     fi
 
-    # Restore look-and-feel backups
+    # Restore or remove look-and-feel overrides
     local laf_dir="${HOME}/.local/share/plasma/look-and-feel"
     if [[ -d "$laf_dir" ]]; then
+        find "$laf_dir" -maxdepth 2 -name ".sync_managed" | while read -r flag; do
+            theme_root=$(dirname "$flag")
+            rm -rf "$theme_root"
+            echo "Removed managed local theme: $(basename "$theme_root")"
+        done
+        
+        # Fallback for themes that were modified but not fully copied (restore .bak files)
         find "$laf_dir" -name "defaults.bak" | while read -r bak; do
             defaults="${bak%.bak}"
             mv "$bak" "$defaults"
