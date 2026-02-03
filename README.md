@@ -4,13 +4,14 @@
   <img src="screenshots/example.gif" width="800" />
 </div>
 
-**Plasma Day/Night Sync** is a robust theme switcher for the KDE Plasma desktop environment. It hooks into KDE's built-in Day/Night mode switcher to automatically synchronize theme components that otherwise wouldn't get switched, such as Kvantum themes, GTK themes, Icon sets, Konsole profiles, and even custom scripts.
+**Plasma Day/Night Sync** is a robust theme switcher for the KDE Plasma desktop environment. It hooks into KDE's built-in Day/Night mode switcher to automatically synchronize theme components that otherwise wouldn't get switched, or that you want to override with different options than the theme provides. Supports Kvantum themes, color schemes, GTK themes, Icon sets, Konsole profiles, and custom scripts.
 
 It runs as a background service (systemd user unit) to ensure your desktop experience is consistent whenever you toggle the global theme via Quick Settings or when KDE switches the theme automatically.
 
 ## Features
 
 -   **Kvantum Integration:** Automatically switches Kvantum themes (useful for application styling).
+-   **Color Scheme Sync:** Switches Plasma color schemes for Day/Night modes.
 -   **GTK Theme Sync:** Updates GTK 3/4 themes to match your Plasma preference.
 -   **Flatpak Support:** Automatically applies GTK and Kvantum themes to Flatpak apps, with icon support.
 -   **Icon Theme Sync:** Changes icon packs for Day/Night modes.
@@ -78,9 +79,11 @@ You can re-configure specific components without going through the whole wizard:
 
 ```bash
 ./plasma-daynight-sync.sh configure --kvantum    # Only re-configure Kvantum
+./plasma-daynight-sync.sh configure --colors     # Only re-configure Color Schemes
 ./plasma-daynight-sync.sh configure --icons      # Only re-configure Icons
 ./plasma-daynight-sync.sh configure --gtk        # Only re-configure GTK
 ./plasma-daynight-sync.sh configure --konsole    # Only re-configure Konsole
+./plasma-daynight-sync.sh configure --splash     # Only re-configure Splash Screen
 ./plasma-daynight-sync.sh configure --script     # Only re-configure Custom Scripts
 ./plasma-daynight-sync.sh configure --widget     # Install/reinstall panel widget
 ./plasma-daynight-sync.sh configure --shortcut   # Install/reinstall keyboard shortcut
