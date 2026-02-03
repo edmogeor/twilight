@@ -484,7 +484,6 @@ update_laf_icons() {
     local icon_theme="$2"
     local defaults_file=""
     local system_laf_root=""
-    local laf_root=""
 
     # Global variable to return the potentially new ID
     UPDATED_LAF_ID="$laf"
@@ -494,7 +493,6 @@ update_laf_icons() {
         if [[ -f "${dir}/${laf}/contents/defaults" ]]; then
             defaults_file="${dir}/${laf}/contents/defaults"
             system_laf_root="${dir}/${laf}"
-            laf_root="${dir}/${laf}"
             break
         fi
     done
@@ -545,21 +543,6 @@ update_laf_icons() {
         
         UPDATED_LAF_ID="$new_id"
         defaults_file="${new_laf_root}/contents/defaults"
-        laf_root="$new_laf_root"
-    fi
-
-    # Update metadata name if it's a managed copy (to include icon theme name)
-    if [[ -d "${laf_root:-}" && -f "${laf_root}/.sync_managed" && -f "${laf_root}/metadata.json" ]]; then
-        local base_id
-        base_id=$(basename "$laf_root" | sed 's/\.copy$//')
-        local base_name
-        base_name=$(get_friendly_name laf "$base_id")
-        
-        local tmp_json
-        tmp_json=$(mktemp)
-        jq --arg name "$base_name ($icon_theme)" \
-           '.KPlugin.Name = $name' \
-           "${laf_root}/metadata.json" > "$tmp_json" && mv "$tmp_json" "${laf_root}/metadata.json"
     fi
 
     # Backup the defaults file if not already backed up
