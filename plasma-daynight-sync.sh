@@ -345,9 +345,38 @@ do_toggle() {
     fi
 }
 
+clean_app_overrides() {
+    echo -e "${BLUE}Scanning for hardcoded application theme overrides...${RESET}"
+    local count=0
+    # Search for files in ~/.config (depth 1) containing common override keys
+    # Keys: ColorScheme (Dolphin/Gwenview), Color Theme (Kate/KWrite)
+    while read -r file; do
+        [[ -f "$file" ]] || continue
+        local filename=$(basename "$file")
+        # Skip global configs and our own config
+        [[ "$filename" == "kdeglobals" || "$filename" == "plasma-daynight-sync.conf" ]] && continue
+        
+        if grep -qE "^(ColorScheme|Color Theme)=" "$file"; then
+            echo -e "  ${YELLOW}!${RESET} Removing theme override from ${BOLD}$filename${RESET}"
+            sed -i -E '/^(ColorScheme|Color Theme)=/d' "$file"
+            ((count++))
+        fi
+    done < <(find "${HOME}/.config" -maxdepth 1 -type f)
+
+    if [[ $count -eq 0 ]]; then
+        echo "  No hardcoded overrides detected."
+    else
+        echo -e "  ${GREEN}✓${RESET} Cleaned $count configuration files."
+    fi
+}
+
 do_configure() {
     check_desktop_environment
     check_dependencies
+    
+    # Remove app-specific overrides so they follow the global theme
+    clean_app_overrides
+    echo ""
 
     # Parse modifiers
     shift # Remove 'configure' from args
