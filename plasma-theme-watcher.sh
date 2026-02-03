@@ -188,19 +188,39 @@ apply_splash() {
     fi
 }
 
+update_laf_icons() {
+    local laf="$1"
+    local icon_theme="$2"
+    local defaults_file=""
+
+    # Find the defaults file for this look-and-feel
+    for dir in "${HOME}/.local/share/plasma/look-and-feel" "/usr/share/plasma/look-and-feel"; do
+        if [[ -f "${dir}/${laf}/contents/defaults" ]]; then
+            defaults_file="${dir}/${laf}/contents/defaults"
+            break
+        fi
+    done
+
+    if [[ -z "$defaults_file" ]]; then
+        echo "Warning: Could not find defaults file for $laf" >&2
+        return 1
+    fi
+
+    # Check if we need to copy to user directory (if it's a system file)
+    if [[ "$defaults_file" == /usr/* ]]; then
+        local user_dir="${HOME}/.local/share/plasma/look-and-feel/${laf}/contents"
+        mkdir -p "$user_dir"
+        cp "$defaults_file" "$user_dir/defaults"
+        defaults_file="$user_dir/defaults"
+    fi
+
+    # Update the icon theme
+    kwriteconfig6 --file "$defaults_file" --group Icons --key Theme "$icon_theme"
+}
+
 refresh_kvantum_style() {
     local style="$1"
-    local opposite
-    [[ "$style" == "kvantum" ]] && opposite="kvantum-dark" || opposite="kvantum"
-
-    # Force a style change by setting opposite first, then target
-    kwriteconfig6 --file kdeglobals --group KDE --key widgetStyle "$opposite"
-    sleep 0.02
-    dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32:2 int32:0
-    sleep 0.05
     kwriteconfig6 --file kdeglobals --group KDE --key widgetStyle "$style"
-    sleep 0.02
-    dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.notifyChange int32:2 int32:0
 }
 
 apply_theme() {
@@ -215,6 +235,7 @@ apply_theme() {
         [[ -n "$KONSOLE_DARK" ]] && apply_konsole_profile "$KONSOLE_DARK"
         apply_splash
         [[ -n "$SCRIPT_DARK" && -x "$SCRIPT_DARK" ]] && "$SCRIPT_DARK"
+        dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh
         echo "[$(date)] Switched to 🌙 DARK mode"
     elif [[ "$laf" == "$LAF_LIGHT" ]]; then
         if [[ -n "$KVANTUM_LIGHT" ]]; then
@@ -226,6 +247,7 @@ apply_theme() {
         [[ -n "$KONSOLE_LIGHT" ]] && apply_konsole_profile "$KONSOLE_LIGHT"
         apply_splash
         [[ -n "$SCRIPT_LIGHT" && -x "$SCRIPT_LIGHT" ]] && "$SCRIPT_LIGHT"
+        dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh
         echo "[$(date)] Switched to ☀️ LIGHT mode"
     else
         echo "[$(date)] Unknown LookAndFeel: $laf — skipping"
@@ -441,6 +463,24 @@ do_configure() {
                 read -rp "Select 🌙 DARK mode icon theme [1-${#icon_themes[@]}]: " choice
                 if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#icon_themes[@]} )); then
                     ICON_DARK="${icon_themes[$((choice - 1))]}"
+
+                    # Offer to update look-and-feel defaults
+                    echo ""
+                    echo -e "${YELLOW}Note:${RESET} You can embed these icon themes directly into your look-and-feel themes."
+                    echo "This means KDE will switch icons automatically, without needing this watcher."
+                    echo -e "${YELLOW}Warning:${RESET} This change won't persist if you reinstall/update the themes."
+                    read -rp "Update look-and-feel themes with these icon packs? [y/N]: " choice
+                    if [[ "$choice" =~ ^[Yy]$ ]]; then
+                        update_laf_icons "$laf_light" "$ICON_LIGHT" && \
+                            echo -e "  ${GREEN}✓${RESET} Updated $laf_light with $ICON_LIGHT"
+                        update_laf_icons "$laf_dark" "$ICON_DARK" && \
+                            echo -e "  ${GREEN}✓${RESET} Updated $laf_dark with $ICON_DARK"
+                        # Clear icon config since LAF will handle it
+                        ICON_LIGHT=""
+                        ICON_DARK=""
+                        PLASMA_CHANGEICONS=""
+                        echo "Icon switching will now be handled by the look-and-feel themes."
+                    fi
                 else
                     ICON_LIGHT=""
                     ICON_DARK=""
@@ -664,6 +704,19 @@ EOF
     systemctl --user daemon-reload
     systemctl --user enable --now "$SERVICE_NAME"
     echo -e "${GREEN}Successfully configured and started $SERVICE_NAME.${RESET}"
+
+    # Check if plasma-qt-forcerefresh patch is installed
+    local platform_theme_lib="/usr/lib/qt6/plugins/platformthemes/KDEPlasmaPlatformTheme6.so"
+    if [[ -f "$platform_theme_lib" ]] && ! nm -C "$platform_theme_lib" 2>/dev/null | grep -q "forceStyleRefresh"; then
+        echo ""
+        echo -e "${YELLOW}Note:${RESET} For Qt applications to refresh seamlessly when switching themes,"
+        echo "you may need to install the plasma-qt-forcerefresh patch:"
+        echo ""
+        echo "  git clone https://github.com/edmogeor/plasma-qt-forcerefresh.git"
+        echo "  cd plasma-qt-forcerefresh && ./plasma-integration-patch-manager.sh install"
+        echo ""
+        echo "Without this patch, some Qt apps may require a restart to reflect theme changes."
+    fi
 }
 
 do_remove() {
