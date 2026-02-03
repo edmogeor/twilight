@@ -29,6 +29,13 @@ PLASMOID_INSTALL_DIR="${HOME}/.local/share/plasma/plasmoids/${PLASMOID_ID}"
 DESKTOP_FILE="${HOME}/.local/share/applications/plasma-daynight-toggle.desktop"
 SHORTCUT_ID="plasma-daynight-toggle.desktop"
 
+show_laf_reminder() {
+    echo -e "${YELLOW}Reminder:${RESET} Make sure your Day and Night themes are set to your preferred themes."
+    echo "You can set them in: System Settings > Colors & Themes > Global Theme"
+    echo "Click the ☀️/🌙 icons at the top-right to assign themes for each mode."
+    echo ""
+}
+
 scan_kvantum_themes() {
     local themes=()
     for dir in /usr/share/Kvantum "$KVANTUM_DIR"; do
@@ -276,7 +283,16 @@ apply_konsole_profile() {
 
 apply_splash() {
     if [[ -n "$SPLASH_OVERWRITE" ]]; then
+        # Delay to let KDE finish applying LookAndFeel (which overwrites ksplashrc)
+        sleep 0.5
         kwriteconfig6 --file ksplashrc --group KSplash --key Theme "$SPLASH_OVERWRITE"
+        # When "None" is selected, set Engine to "none" to disable splash screen
+        # (otherwise KDE uses KSplashQML which still shows a splash)
+        if [[ "$SPLASH_OVERWRITE" == "None" ]]; then
+            kwriteconfig6 --file ksplashrc --group KSplash --key Engine "none"
+        else
+            kwriteconfig6 --file ksplashrc --group KSplash --key Engine "KSplashQML"
+        fi
     fi
 }
 
@@ -409,8 +425,17 @@ load_config_strict() {
 
 do_light() {
     [[ -z "${LAF_LIGHT:-}" ]] && load_config_strict
+    # Save auto mode state before plasma-apply-lookandfeel disables it
+    local auto_mode
+    auto_mode=$(kreadconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel)
+
     echo -e "Switching to ☀️ Light theme: ${BOLD}$LAF_LIGHT${RESET}"
     plasma-apply-lookandfeel -a "$LAF_LIGHT"
+
+    # Restore auto mode if it was enabled
+    if [[ "$auto_mode" == "true" ]]; then
+        kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
+    fi
 
     # If watcher is not running, manually sync sub-themes
     if ! systemctl --user is-active --quiet "$SERVICE_NAME"; then
@@ -420,8 +445,17 @@ do_light() {
 
 do_dark() {
     [[ -z "${LAF_DARK:-}" ]] && load_config_strict
+    # Save auto mode state before plasma-apply-lookandfeel disables it
+    local auto_mode
+    auto_mode=$(kreadconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel)
+
     echo -e "Switching to 🌙 Dark theme: ${BOLD}$LAF_DARK${RESET}"
     plasma-apply-lookandfeel -a "$LAF_DARK"
+
+    # Restore auto mode if it was enabled
+    if [[ "$auto_mode" == "true" ]]; then
+        kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
+    fi
 
     # If watcher is not running, manually sync sub-themes
     if ! systemctl --user is-active --quiet "$SERVICE_NAME"; then
@@ -469,7 +503,9 @@ clean_app_overrides() {
 do_configure() {
     check_desktop_environment
     check_dependencies
-    
+
+    show_laf_reminder
+
     # Remove app-specific overrides so they follow the global theme
     clean_app_overrides
     echo ""
@@ -899,6 +935,10 @@ EOF
 
     systemctl --user daemon-reload
     systemctl --user enable --now "$SERVICE_NAME"
+
+    # Enable automatic theme switching in KDE Quick Settings
+    kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
+
     echo -e "${GREEN}Successfully configured and started $SERVICE_NAME.${RESET}"
 
     # Check if plasma-qt-forcerefresh patch is installed
