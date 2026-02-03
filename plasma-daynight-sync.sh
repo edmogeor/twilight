@@ -3,7 +3,7 @@
 # plasma-daynight-sync.sh
 # Manages the plasma-daynight-sync: a theme switcher for KDE day/night mode.
 #   configure [options]  Scan themes, save config, generate watcher script, enable systemd service
-#                        Options: -k|--kvantum -i|--icons -g|--gtk -o|--konsole -c|--color-scheme -s|--script -w|--wallpaper
+#                        Options: -k|--kvantum -i|--icons -g|--gtk -o|--konsole -s|--script -S|--splash -w|--widget -K|--shortcut
 #                        With no options, configures all. With options, only reconfigures specified types.
 #   uninstall            Stop service, remove all installed files
 #   status               Show service status and current configuration
@@ -483,6 +483,8 @@ do_configure() {
     local configure_konsole=false
     local configure_script=false
     local configure_splash=false
+    local configure_widget=false
+    local configure_shortcut=false
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -492,9 +494,11 @@ do_configure() {
             -o|--konsole)       configure_konsole=true; configure_all=false ;;
             -s|--script)        configure_script=true; configure_all=false ;;
             -S|--splash)        configure_splash=true; configure_all=false ;;
+            -w|--widget)        configure_widget=true; configure_all=false ;;
+            -K|--shortcut)      configure_shortcut=true; configure_all=false ;;
             *)
                 echo "Unknown option: $1" >&2
-                echo "Options: -k|--kvantum -i|--icons -g|--gtk -o|--konsole -s|--script -S|--splash" >&2
+                echo "Options: -k|--kvantum -i|--icons -g|--gtk -o|--konsole -s|--script -S|--splash -w|--widget -K|--shortcut" >&2
                 exit 1
                 ;;
         esac
@@ -820,6 +824,33 @@ EOF
     # Install globally?
     local executable_path
     local installed_globally=false
+
+    # Check if already installed globally
+    if [[ -x "$CLI_PATH" ]]; then
+        installed_globally=true
+        executable_path="$CLI_PATH"
+    fi
+
+    # Handle widget-only or shortcut-only configuration
+    if [[ "$configure_widget" == true || "$configure_shortcut" == true ]] && [[ "$configure_all" == false ]]; then
+        if [[ "$installed_globally" == false ]]; then
+            echo -e "${RED}Error: Widget and shortcut require global installation.${RESET}" >&2
+            echo "Run 'plasma-daynight-sync configure' first to install globally." >&2
+            exit 1
+        fi
+        # Update the script
+        cp "$0" "$CLI_PATH"
+        chmod +x "$CLI_PATH"
+
+        if [[ "$configure_widget" == true ]]; then
+            install_plasmoid
+        fi
+        if [[ "$configure_shortcut" == true ]]; then
+            install_shortcut
+        fi
+        return 0
+    fi
+
     echo ""
     read -rp "Do you want to install 'plasma-daynight-sync' globally to ~/.local/bin? [y/N]: " choice
     if [[ "$choice" =~ ^[Yy]$ ]]; then
@@ -1019,6 +1050,8 @@ Configure options:
   -o, --konsole       Configure Konsole profiles only
   -S, --splash        Configure splash screens only
   -s, --script        Configure custom scripts only
+  -w, --widget        Install/reinstall panel widget
+  -K, --shortcut      Install/reinstall keyboard shortcut (Meta+Shift+L)
 
   With no options, configures all. With options, only reconfigures specified types.
 
