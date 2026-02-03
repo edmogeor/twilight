@@ -498,7 +498,9 @@ update_laf_icons() {
 
     # Check if we need to copy to user directory (if it's a system file)
     if [[ "$defaults_file" == /usr/* ]]; then
-        echo -e "  ${YELLOW}!${RESET} $laf is a system theme; creating local copy in ~/.local for overrides..."
+        local friendly_name
+        friendly_name=$(get_friendly_name laf "$laf")
+        echo -e "  ${YELLOW}!${RESET} ${BOLD}$friendly_name${RESET} ($laf) is a system theme; creating local copy in ~/.local for overrides..."
         local system_laf_root="/usr/share/plasma/look-and-feel/${laf}"
         local laf_root="${HOME}/.local/share/plasma/look-and-feel/${laf}"
 
@@ -1134,9 +1136,9 @@ do_configure() {
                     read -rp "Update look-and-feel themes with these icon packs? [y/N]: " choice
                     if [[ "$choice" =~ ^[Yy]$ ]]; then
                         update_laf_icons "$laf_day" "$ICON_DAY" && \
-                            echo -e "  ${GREEN}✓${RESET} Updated $laf_day with $ICON_DAY"
+                            echo -e "  ${GREEN}✓${RESET} Updated ${BOLD}$(get_friendly_name laf "$laf_day")${RESET} ($laf_day) with $ICON_DAY"
                         update_laf_icons "$laf_night" "$ICON_NIGHT" && \
-                            echo -e "  ${GREEN}✓${RESET} Updated $laf_night with $ICON_NIGHT"
+                            echo -e "  ${GREEN}✓${RESET} Updated ${BOLD}$(get_friendly_name laf "$laf_night")${RESET} ($laf_night) with $ICON_NIGHT"
                         # Clear icon config since LAF will handle it
                         ICON_DAY=""
                         ICON_NIGHT=""
