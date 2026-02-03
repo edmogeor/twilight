@@ -1,0 +1,19 @@
+{
+    "KPackageStructure": "Plasma/Applet",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "github.com/edmogeor",
+                "Name": "plasma-daynight-sync"
+            }
+        ],
+        "Category": "Utilities",
+        "Description": "Toggle between light and dark themes",
+        "Icon": "weather-clear",
+        "Id": "org.kde.plasma.daynighttoggle",
+        "License": "GPL-3.0",
+        "Name": "Day/Night Toggle",
+        "Version": "1.0.0"
+    },
+    "X-Plasma-API-Minimum-Version": "6.0"
+}

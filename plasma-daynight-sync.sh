@@ -24,6 +24,8 @@ SERVICE_NAME="plasma-daynight-sync"
 SERVICE_DIR="${HOME}/.config/systemd/user"
 SERVICE_FILE="${SERVICE_DIR}/${SERVICE_NAME}.service"
 CLI_PATH="${HOME}/.local/bin/plasma-daynight-sync"
+PLASMOID_ID="org.kde.plasma.daynighttoggle"
+PLASMOID_INSTALL_DIR="${HOME}/.local/share/plasma/plasmoids/${PLASMOID_ID}"
 
 scan_kvantum_themes() {
     local themes=()
@@ -91,6 +93,29 @@ scan_splash_themes() {
     done
     # Deduplicate and sort
     printf '%s\n' "${themes[@]}" | sort -u
+}
+
+install_plasmoid() {
+    local script_dir
+    script_dir="$(dirname "$(readlink -f "$0")")"
+    local plasmoid_src="${script_dir}/plasmoid"
+
+    if [[ ! -d "$plasmoid_src" ]]; then
+        echo -e "${RED}Error: Plasmoid source not found at $plasmoid_src${RESET}" >&2
+        return 1
+    fi
+
+    mkdir -p "$PLASMOID_INSTALL_DIR"
+    cp -r "$plasmoid_src"/* "$PLASMOID_INSTALL_DIR/"
+    echo -e "${GREEN}Installed Day/Night Toggle widget to $PLASMOID_INSTALL_DIR${RESET}"
+    echo "You can add it to your panel by right-clicking the panel > Add Widgets > Day/Night Toggle"
+}
+
+remove_plasmoid() {
+    if [[ -d "$PLASMOID_INSTALL_DIR" ]]; then
+        rm -rf "$PLASMOID_INSTALL_DIR"
+        echo "Removed Day/Night Toggle widget"
+    fi
 }
 
 cleanup_stale() {
@@ -758,6 +783,7 @@ EOF
 
     # Install globally?
     local executable_path
+    local installed_globally=false
     echo ""
     read -rp "Do you want to install 'plasma-daynight-sync' globally to ~/.local/bin? [y/N]: " choice
     if [[ "$choice" =~ ^[Yy]$ ]]; then
@@ -765,10 +791,21 @@ EOF
         cp "$0" "$CLI_PATH"
         chmod +x "$CLI_PATH"
         executable_path="$CLI_PATH"
+        installed_globally=true
         echo -e "${GREEN}Installed to $CLI_PATH${RESET}"
+
+        # Offer to install the panel widget
+        echo ""
+        read -rp "Do you want to install the Day/Night Toggle panel widget? [y/N]: " choice
+        if [[ "$choice" =~ ^[Yy]$ ]]; then
+            install_plasmoid
+        fi
     else
         # Use absolute path of current script
         executable_path=$(readlink -f "$0")
+        echo ""
+        echo -e "${YELLOW}Note:${RESET} The Day/Night Toggle panel widget requires the command to be installed globally."
+        echo "Run configure again and choose 'yes' for global installation to enable the widget."
     fi
 
     # Install systemd service
@@ -841,6 +878,9 @@ do_remove() {
         fi
     done
 
+    # Remove plasmoid if installed
+    remove_plasmoid
+
     if [[ "$removed" -eq 1 ]]; then
         systemctl --user daemon-reload
     fi
@@ -859,6 +899,11 @@ do_status() {
         echo -e "    Enabled: ${GREEN}yes${RESET}"
     else
         echo -e "    Enabled: ${RED}no${RESET}"
+    fi
+    if [[ -d "$PLASMOID_INSTALL_DIR" ]]; then
+        echo -e "    Panel widget: ${GREEN}installed${RESET}"
+    else
+        echo -e "    Panel widget: ${YELLOW}not installed${RESET}"
     fi
 
     echo ""
@@ -912,7 +957,7 @@ Commands:
   light        Switch to Light mode (and sync sub-themes)
   dark         Switch to Dark mode (and sync sub-themes)
   toggle       Toggle between Light and Dark mode
-  remove       Stop service, remove all installed files
+  remove       Stop service, remove all installed files and widget
   status       Show service status and current configuration
   help         Show this help message
 
@@ -925,6 +970,11 @@ Configure options:
   -s, --script        Configure custom scripts only
 
   With no options, configures all. With options, only reconfigures specified types.
+
+Panel Widget:
+  During configuration, if you install the command globally (~/.local/bin),
+  you'll be offered to install a Day/Night Toggle panel widget. This adds
+  a sun/moon button to your panel for quick theme switching.
 
 Examples:
   $0 configure              Configure all theme options
