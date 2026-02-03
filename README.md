@@ -134,12 +134,12 @@ To set up automatic day/night wallpaper switching:
 ├── metadata.json
 └── contents/
     ├── images/          # Day wallpapers
-    │   ├── 5120x2880.png
     │   ├── 1440x2960.png
+    │   ├── 5120x2880.png
     │   └── 7680x2160.png
     └── images_dark/     # Night wallpapers
-        ├── 5120x2880.png
         ├── 1440x2960.png
+        ├── 5120x2880.png
         └── 7680x2160.png
 ```
 
@@ -162,7 +162,7 @@ To set up automatic day/night wallpaper switching:
 3. **Add your wallpaper images:**
    - Place day wallpapers in `contents/images/`
    - Place night wallpapers in `contents/images_dark/`
-   - Name each file by its resolution (e.g., `5120x2880.png`)
+   - Name each file by its resolution (e.g., `1440x2960.png`)
    - KDE will automatically select the appropriate resolution for each display
 
 4. **Select the wallpaper:**
