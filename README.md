@@ -58,15 +58,12 @@ flatpak install org.kde.KStyle.Kvantum
 
 ## Installation & Configuration
 
-1.  **Clone or Download** this repository.
-2.  **Make the script executable** (optional, the script handles installation):
-    ```bash
-    chmod +x plasma-daynight-sync.sh
-    ```
-3.  **Run the configuration wizard**:
-    ```bash
-    ./plasma-daynight-sync.sh configure
-    ```
+Clone the repository and run the configuration wizard:
+
+```bash
+git clone https://github.com/edmogeor/plasma-daynight-sync.git
+cd plasma-daynight-sync && ./plasma-daynight-sync.sh configure
+```
 
 The `configure` command will:
 -   Scan your system for available themes (Kvantum, Plasma styles, window decorations, color schemes, cursors, icons, GTK, etc.).
