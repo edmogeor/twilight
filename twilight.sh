@@ -825,18 +825,29 @@ generate_custom_theme() {
         splash_theme="${SPLASH_DARK:-}"
     fi
 
-    # Update metadata.json with new ID and name
-    local metadata='{
+    # Update metadata.json with new ID and name, preserving original authors
+    local original_authors='[{ "Name": "Unknown" }]'
+    if [[ -f "${base_theme_dir}/metadata.json" ]]; then
+        local extracted
+        extracted=$(grep -o '"Authors"[[:space:]]*:[[:space:]]*\[.*\]' "${base_theme_dir}/metadata.json" 2>/dev/null | sed 's/"Authors"[[:space:]]*:[[:space:]]*//')
+        [[ -n "$extracted" ]] && original_authors="$extracted"
+    fi
+
+    local metadata
+    metadata=$(cat <<METADATA
+{
     "KPlugin": {
-        "Authors": [{ "Name": "twilight" }],
-        "Description": "Custom '"$mode"' theme based on '"$(basename "$base_theme_dir")"'",
-        "Id": "'"$theme_id"'",
-        "Name": "'"$theme_name"'",
+        "Authors": ${original_authors},
+        "Description": "Custom ${mode} theme based on $(basename "$base_theme_dir")",
+        "Id": "${theme_id}",
+        "Name": "${theme_name}",
         "Version": "1.0"
     },
     "KPackageStructure": "Plasma/LookAndFeel",
     "X-Plasma-APIVersion": "2"
-}'
+}
+METADATA
+)
 
     if [[ "$THEME_INSTALL_GLOBAL" == true ]]; then
         echo "$metadata" | sudo tee "${theme_dir}/metadata.json" > /dev/null
