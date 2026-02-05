@@ -4,7 +4,7 @@
   <img src="screenshots/example.gif" width="800" />
 </div>
 
-**twilight** is a dark/light mode theme switcher for KDE Plasma's day/night cycle. It hooks into KDE's built-in day/night mode to automatically synchronize theme components that otherwise wouldn't get switched, or that you want to override with different options than the global theme provides.
+**twilight** hooks into KDE's built-in day/night mode to automatically synchronize theme components that otherwise wouldn't get switched, or that you want to override with different options than the global theme provides.
 
 It generates custom Plasma Global Themes from your selections so KDE applies most overrides natively, and runs a lightweight background service to handle the rest (Kvantum, GTK, Konsole, Flatpak, browser color scheme, custom scripts).
 
