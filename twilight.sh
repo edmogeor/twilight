@@ -1270,7 +1270,7 @@ do_configure() {
             laf_light="$BASE_THEME_LIGHT"
         else
             echo -e "${RED}Error: KDE is set to use Custom (Light) but the base theme is unknown.${RESET}" >&2
-            echo "Please select a light theme in System Settings > Colors & Themes > Global Theme, then re-run configure." >&2
+            echo "Please make sure light and dark themes are set in System Settings > Quick Settings" >&2
             exit 1
         fi
     fi
@@ -1279,7 +1279,7 @@ do_configure() {
             laf_dark="$BASE_THEME_DARK"
         else
             echo -e "${RED}Error: KDE is set to use Custom (Dark) but the base theme is unknown.${RESET}" >&2
-            echo "Please select a dark theme in System Settings > Colors & Themes > Global Theme, then re-run configure." >&2
+            echo "Please make sure light and dark themes are set in System Settings > Quick Settings" >&2
             exit 1
         fi
     fi
@@ -1842,12 +1842,14 @@ do_configure() {
         # Apply the appropriate custom theme to match the user's current mode
         local current_laf
         current_laf=$(kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage 2>/dev/null)
+        LAF_LIGHT="$laf_light"
+        LAF_DARK="$laf_dark"
         if [[ "$current_laf" == "$CUSTOM_THEME_DARK" || "$current_laf" == "$BASE_THEME_DARK" ]]; then
-            LAF_DARK="$laf_dark"
-            do_dark
+            echo -e "Switching to 🌙 Dark theme: ${BOLD}$(get_friendly_name laf "$LAF_DARK")${RESET}"
+            plasma-apply-lookandfeel -a "$LAF_DARK"
         else
-            LAF_LIGHT="$laf_light"
-            do_light
+            echo -e "Switching to ☀️ Light theme: ${BOLD}$(get_friendly_name laf "$LAF_LIGHT")${RESET}"
+            plasma-apply-lookandfeel -a "$LAF_LIGHT"
         fi
         echo -e "${GREEN}Custom themes updated.${RESET}"
 
@@ -1881,12 +1883,14 @@ do_configure() {
                 # Apply the appropriate custom theme to match the user's current mode
                 local current_laf
                 current_laf=$(kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage 2>/dev/null)
+                LAF_LIGHT="$laf_light"
+                LAF_DARK="$laf_dark"
                 if [[ "$current_laf" == "$BASE_THEME_DARK" ]]; then
-                    LAF_DARK="$laf_dark"
-                    do_dark
+                    echo -e "Switching to 🌙 Dark theme: ${BOLD}$(get_friendly_name laf "$LAF_DARK")${RESET}"
+                    plasma-apply-lookandfeel -a "$LAF_DARK"
                 else
-                    LAF_LIGHT="$laf_light"
-                    do_light
+                    echo -e "Switching to ☀️ Light theme: ${BOLD}$(get_friendly_name laf "$LAF_LIGHT")${RESET}"
+                    plasma-apply-lookandfeel -a "$LAF_LIGHT"
                 fi
 
                 echo -e "${GREEN}Custom themes installed and set as defaults.${RESET}"
