@@ -1,4 +1,4 @@
-# twilight
+# twilight: a dark/light mode theme switcher for KDE Plasma's day/night cycle.
 
 <div align="center">
   <img src="screenshots/example.gif" width="800" />
