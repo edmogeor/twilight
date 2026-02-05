@@ -1263,6 +1263,26 @@ do_configure() {
     local laf_light laf_dark
     laf_light=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel)
     laf_dark=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel)
+
+    # If KDE still points to our custom themes, resolve back to the base themes
+    if [[ "$laf_light" == "org.kde.custom.light" ]]; then
+        if [[ -n "${BASE_THEME_LIGHT:-}" ]]; then
+            laf_light="$BASE_THEME_LIGHT"
+        else
+            echo -e "${RED}Error: KDE is set to use Custom (Light) but the base theme is unknown.${RESET}" >&2
+            echo "Please select a light theme in System Settings > Colors & Themes > Global Theme, then re-run configure." >&2
+            exit 1
+        fi
+    fi
+    if [[ "$laf_dark" == "org.kde.custom.dark" ]]; then
+        if [[ -n "${BASE_THEME_DARK:-}" ]]; then
+            laf_dark="$BASE_THEME_DARK"
+        else
+            echo -e "${RED}Error: KDE is set to use Custom (Dark) but the base theme is unknown.${RESET}" >&2
+            echo "Please select a dark theme in System Settings > Colors & Themes > Global Theme, then re-run configure." >&2
+            exit 1
+        fi
+    fi
     echo -e "  ☀️ Light theme: ${BOLD}$(get_friendly_name laf "$laf_light")${RESET}"
     echo -e "  🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark")${RESET}"
 
