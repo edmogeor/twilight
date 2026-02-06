@@ -2886,6 +2886,7 @@ Description=Plasma Light/Dark Theme Sync
 After=graphical-session.target
 
 [Service]
+ExecCondition=/bin/sh -c '[ "\$(id -u)" -ge 1000 ]'
 ExecStart=$executable_path watch
 Restart=on-failure
 RestartSec=5
