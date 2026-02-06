@@ -4,7 +4,6 @@
  */
 import QtQuick
 import QtQuick.Layouts
-import QtQuick.Controls
 import org.kde.plasma.plasmoid
 import org.kde.plasma.core as PlasmaCore
 import org.kde.plasma.plasma5support as Plasma5Support
@@ -26,19 +25,19 @@ PlasmoidItem {
     toolTipSubText: "Click to toggle"
 
     Plasmoid.contextualActions: [
-        Action {
+        Kirigami.Action {
             text: "Light Mode"
-            icon.name: "weather-clear"
+            iconName: "weather-clear"
             onTriggered: root.setLightMode()
         },
-        Action {
+        Kirigami.Action {
             text: "Dark Mode"
-            icon.name: "weather-clear-night"
+            iconName: "weather-clear-night"
             onTriggered: root.setDarkMode()
         },
-        Action {
+        Kirigami.Action {
             text: "Toggle Mode"
-            icon.name: "system-switch-user"
+            iconName: "system-switch-user"
             onTriggered: root.toggleMode()
         }
     ]
