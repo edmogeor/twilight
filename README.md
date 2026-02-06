@@ -1,7 +1,7 @@
 <div align="center">
   # gloam
 
-#### gloam: Syncs Kvantum, GTK, and custom scripts with Plasma 6's native light/dark (day/night) theme switching - and more.
+#### Syncs Kvantum, GTK, and custom scripts with Plasma 6's native light/dark (day/night) theme switching - and more.
   <img src="screenshots/example.gif" width="800" />
 </div>
 
