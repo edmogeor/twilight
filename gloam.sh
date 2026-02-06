@@ -959,7 +959,7 @@ remove_custom_themes() {
 apply_theme() {
     local laf="$1"
     # Wait for LookAndFeel to finish applying before overriding settings
-    sleep 1
+    sleep 0.5
 
     # Check if we're using custom themes (bundled options handled by theme itself)
     local using_custom_themes=false
@@ -1085,7 +1085,7 @@ do_watch() {
     log "Watcher started"
 
     # Wait for Plasma to fully initialize before applying theme
-    sleep 2
+    sleep 0.5
 
     PREV_LAF=$(get_laf)
     log "Initial theme: $PREV_LAF"
