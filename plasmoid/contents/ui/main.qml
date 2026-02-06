@@ -74,6 +74,14 @@ PlasmoidItem {
         onTriggered: modeReader.checkMode()
     }
 
+    // Safety timer to reset isRunning if command fails/hangs
+    Timer {
+        interval: 5000
+        running: root.isRunning
+        repeat: false
+        onTriggered: root.isRunning = false
+    }
+
     function toggleMode() {
         if (isRunning) return
         isRunning = true
@@ -84,7 +92,6 @@ PlasmoidItem {
         }
     }
 
-    preferredRepresentation: fullRepresentation
     fullRepresentation: MouseArea {
         id: mouseArea
 
