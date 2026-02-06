@@ -4,9 +4,13 @@
   <img src="screenshots/example.gif" width="800" />
 </div>
 
-**gloam** hooks into KDE's built-in day/night mode to automatically synchronize theme components that otherwise wouldn't get switched, or that you want to override with different options than the global theme provides.
+**gloam** solves a common problem in KDE Plasma: **external themes don't switch automatically.**
 
-It generates custom Plasma Global Themes from your selections so KDE applies most overrides natively, and runs a lightweight background service to handle the rest (Kvantum, GTK, Konsole, Flatpak, and custom scripts).
+While Plasma handles its own styling well, components like **Kvantum**, **GTK apps**, **Flatpaks**, and **Konsole** often get left behind when switching between day and night modes.
+
+**gloam** bridges this gap. It hooks into KDE's native day/night transition to instantly synchronize *everything* on your desktop, ensuring a consistent look across all applications.
+
+It works by bundling your preferences into custom Plasma Global Themes (for native integration) and running a lightweight service to handle the external tools that Plasma misses.
 
 ## Features
 
@@ -113,10 +117,8 @@ Once configured, the service runs in the background. You usually don't need to t
 
 ## How It Works
 
-1. During `configure`, gloam generates custom Plasma Global Themes that bundle your selected color scheme, icons, cursors, Plasma style, window decorations, and splash screen.
-2. These custom themes are set as your KDE day/night defaults, so Plasma applies most overrides natively when switching.
-3. A systemd service uses `inotifywait` to monitor `~/.config/kdeglobals` for changes.
-4. When a theme switch is detected, the service applies the remaining overrides that can't be bundled: Kvantum, GTK, Konsole profiles, Flatpak themes, and custom scripts.
+1.  **Native Integration:** During setup, `gloam` creates custom Plasma Global Themes containing your choices (icons, cursors, etc.). These are set as your KDE defaults, so Plasma handles the main switch natively.
+2.  **Bridging the Gap:** A lightweight background service monitors Plasma's state. When it detects a switch, it instantly applies the "external" settings that Plasma can't touch: changing Kvantum themes, updating GTK configs, reloading Konsole profiles, and running your custom scripts.
 
 ## Uninstallation
 
