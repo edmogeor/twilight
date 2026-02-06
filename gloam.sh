@@ -875,6 +875,37 @@ apply_lockscreen_wallpaper() {
         --key Image "file://${wallpaper_dir}"
 }
 
+is_gloam_wallpaper() {
+    local surface="$1"  # "desktop", "lockscreen", or "sddm"
+    case "$surface" in
+        desktop)
+            local rc="${HOME}/.config/plasma-org.kde.plasma.desktop-appletsrc"
+            [[ -f "$rc" ]] || return 1
+            local wp
+            wp=$(awk '/\[Wallpaper\]\[org\.kde\.image\]\[General\]/ { found=1; next }
+                 /^\[/ { found=0 }
+                 found && /^Image=/ { print substr($0, 7); exit }' "$rc")
+            [[ "$wp" == *"/wallpapers/gloam-"* ]]
+            ;;
+        lockscreen)
+            local wp
+            wp=$(kreadconfig6 --file kscreenlockerrc \
+                --group Greeter --group Wallpaper --group org.kde.image --group General \
+                --key Image 2>/dev/null)
+            [[ "$wp" == *"/wallpapers/gloam-"* ]]
+            ;;
+        sddm)
+            local theme bg
+            theme=$(kreadconfig6 --file /etc/sddm.conf.d/kde_settings.conf \
+                --group Theme --key Current 2>/dev/null)
+            [[ -z "$theme" ]] && theme="breeze"
+            bg=$(kreadconfig6 --file "/usr/share/sddm/themes/${theme}/theme.conf.user" \
+                --group General --key background 2>/dev/null)
+            [[ "$bg" == "/usr/local/lib/gloam/"* ]]
+            ;;
+    esac
+}
+
 apply_sddm_wallpaper() {
     local image="$1"
     if [[ -n "$image" && -f "$image" ]]; then
@@ -1223,14 +1254,7 @@ METADATA
 
     # Wallpaper (point both light and dark themes to the dynamic pack)
     if [[ "${WALLPAPER:-}" == true ]]; then
-        local wp_dir
-        if [[ "$THEME_INSTALL_GLOBAL" == true ]]; then
-            wp_dir="/usr/share/wallpapers/gloam-dynamic"
-        else
-            wp_dir="${HOME}/.local/share/wallpapers/gloam-dynamic"
-        fi
-        update_defaults_key "[Wallpaper][org.kde.image][General]" "Image" "file://${wp_dir}"
-        update_defaults_key "[Wallpaper][org.kde.image][General]" "SlidePaths" ""
+        update_defaults_key "[Wallpaper][org.kde.image][General]" "Image" "gloam-dynamic"
     fi
 
     # Add panel layout
@@ -1314,11 +1338,21 @@ apply_theme() {
         # Login screen (SDDM) - always apply (system-level, not applied by plasma-apply-lookandfeel)
         [[ -n "$SDDM_DARK" ]] && apply_sddm_theme "$SDDM_DARK"
 
-        # SDDM wallpaper - always apply (not bundleable)
+        # Wallpapers - switch each surface unless the user has overridden it
         if [[ "${WALLPAPER:-}" == true ]]; then
-            local sddm_bg_dark
-            sddm_bg_dark=$(compgen -G "/usr/local/lib/gloam/sddm-bg-dark.*" | head -1)
-            [[ -n "$sddm_bg_dark" ]] && apply_sddm_wallpaper "$sddm_bg_dark"
+            # Desktop & lock screen - only when not using custom themes (custom themes handle via defaults)
+            if [[ "$using_custom_themes" == false ]]; then
+                local wp_base="${HOME}/.local/share/wallpapers"
+                [[ "${THEME_INSTALL_GLOBAL:-}" == true ]] && wp_base="/usr/share/wallpapers"
+                is_gloam_wallpaper desktop && apply_desktop_wallpaper "${wp_base}/gloam-dark"
+                is_gloam_wallpaper lockscreen && apply_lockscreen_wallpaper "${wp_base}/gloam-dark"
+            fi
+            # SDDM - always explicit (not handled by custom theme defaults)
+            if is_gloam_wallpaper sddm; then
+                local sddm_bg_dark
+                sddm_bg_dark=$(compgen -G "/usr/local/lib/gloam/sddm-bg-dark.*" | head -1)
+                [[ -n "$sddm_bg_dark" ]] && apply_sddm_wallpaper "$sddm_bg_dark"
+            fi
         fi
 
         # Browser color scheme - always apply (not bundleable)
@@ -1377,11 +1411,21 @@ apply_theme() {
         # Login screen (SDDM) - always apply (system-level, not applied by plasma-apply-lookandfeel)
         [[ -n "$SDDM_LIGHT" ]] && apply_sddm_theme "$SDDM_LIGHT"
 
-        # SDDM wallpaper - always apply (not bundleable)
+        # Wallpapers - switch each surface unless the user has overridden it
         if [[ "${WALLPAPER:-}" == true ]]; then
-            local sddm_bg_light
-            sddm_bg_light=$(compgen -G "/usr/local/lib/gloam/sddm-bg-light.*" | head -1)
-            [[ -n "$sddm_bg_light" ]] && apply_sddm_wallpaper "$sddm_bg_light"
+            # Desktop & lock screen - only when not using custom themes (custom themes handle via defaults)
+            if [[ "$using_custom_themes" == false ]]; then
+                local wp_base="${HOME}/.local/share/wallpapers"
+                [[ "${THEME_INSTALL_GLOBAL:-}" == true ]] && wp_base="/usr/share/wallpapers"
+                is_gloam_wallpaper desktop && apply_desktop_wallpaper "${wp_base}/gloam-light"
+                is_gloam_wallpaper lockscreen && apply_lockscreen_wallpaper "${wp_base}/gloam-light"
+            fi
+            # SDDM - always explicit (not handled by custom theme defaults)
+            if is_gloam_wallpaper sddm; then
+                local sddm_bg_light
+                sddm_bg_light=$(compgen -G "/usr/local/lib/gloam/sddm-bg-light.*" | head -1)
+                [[ -n "$sddm_bg_light" ]] && apply_sddm_wallpaper "$sddm_bg_light"
+            fi
         fi
 
         # Browser color scheme - always apply (not bundleable)
