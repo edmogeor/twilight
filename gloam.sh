@@ -1729,7 +1729,7 @@ do_configure() {
     # Select Application Style (Qt widget style)
     if [[ "$configure_all" == true || "$configure_appstyle" == true ]]; then
     echo ""
-    read -rp "Configure application style? (Qt widget style - Breeze, Fusion, etc.) [y/N]: " choice
+    read -rp "Configure application style? (normally automatically set by global theme) [y/N]: " choice
     if [[ "$choice" =~ ^[Yy]$ ]]; then
         echo "Scanning for application styles..."
         local app_style_names=()
@@ -2110,7 +2110,7 @@ do_configure() {
     # Configure day/night wallpapers
     if [[ "$configure_all" == true || "$configure_wallpaper" == true ]]; then
     echo ""
-    read -rp "Configure day/night wallpapers? [y/N]: " choice
+    read -rp "Configure wallpapers? (normally automatically set by global theme) [y/N]: " choice
     if [[ "$choice" =~ ^[Yy]$ ]]; then
         echo ""
         read -rp "Enter ☀️ LIGHT wallpaper path(s) (space-separated files, or a folder): " wp_light_input
