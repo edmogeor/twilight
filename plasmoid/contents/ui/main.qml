@@ -36,7 +36,7 @@ PlasmoidItem {
             onTriggered: root.setDarkMode()
         },
         PlasmaCore.Action {
-            text: "Toggle Mode"
+            text: "Toggle"
             icon.name: "system-switch-user"
             onTriggered: root.toggleMode()
         },
