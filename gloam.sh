@@ -3,7 +3,7 @@
 # gloam.sh
 # gloam: Syncs Kvantum, GTK, and custom scripts with Plasma 6's native light/dark (day/night) theme switching - and more.
 #   configure [options]  Scan themes, save config, generate watcher script, enable systemd service
-#                        Options: -k|--kvantum -i|--icons -g|--gtk -o|--konsole -s|--script -S|--splash -w|--widget -K|--shortcut
+#                        Options: -k|--kvantum -i|--icons -g|--gtk -o|--konsole -s|--script -S|--splash -l|--login -w|--widget -K|--shortcut
 #                        With no options, configures all. With options, only reconfigures specified types.
 #   uninstall            Stop service, remove all installed files
 #   status               Show service status and current configuration
@@ -315,6 +315,12 @@ get_friendly_name() {
                 fi
             done
             ;;
+        sddm)
+            local conf="/usr/share/sddm/themes/${id}/theme.conf"
+            if [[ -f "$conf" ]]; then
+                grep -m1 "^Name=" "$conf" 2>/dev/null | cut -d= -f2 && return 0
+            fi
+            ;;
     esac
     echo "$id"
 }
@@ -412,6 +418,18 @@ scan_splash_themes() {
             name=$(get_friendly_name splash "$id")
             printf '%s|%s\n' "$id" "$name"
         done
+    done | sort -t'|' -k2
+}
+
+scan_sddm_themes() {
+    local sddm_dir="/usr/share/sddm/themes"
+    [[ -d "$sddm_dir" ]] || return 0
+    for theme_dir in "$sddm_dir"/*/; do
+        [[ -f "${theme_dir}theme.conf" || -f "${theme_dir}metadata.desktop" ]] || continue
+        local id name
+        id="$(basename "$theme_dir")"
+        name=$(get_friendly_name sddm "$id")
+        printf '%s|%s\n' "$id" "$name"
     done | sort -t'|' -k2
 }
 
@@ -697,6 +715,36 @@ apply_splash() {
     fi
 }
 
+apply_sddm_theme() {
+    local theme="$1"
+    if [[ -n "$theme" ]]; then
+        # Delay to let KDE finish applying LookAndFeel
+        sleep 1.5
+        if [[ -x /usr/local/lib/gloam/set-sddm-theme ]]; then
+            sudo /usr/local/lib/gloam/set-sddm-theme "$theme" 2>/dev/null || true
+        else
+            sudo kwriteconfig6 --file /etc/sddm.conf.d/kde_settings.conf \
+                --group Theme --key Current "$theme" 2>/dev/null || true
+        fi
+    fi
+}
+
+setup_sddm_sudoers() {
+    # Create wrapper script
+    sudo mkdir -p /usr/local/lib/gloam
+    sudo tee /usr/local/lib/gloam/set-sddm-theme > /dev/null <<'SCRIPT'
+#!/bin/bash
+[[ -z "$1" ]] && exit 1
+kwriteconfig6 --file /etc/sddm.conf.d/kde_settings.conf --group Theme --key Current "$1"
+SCRIPT
+    sudo chmod 755 /usr/local/lib/gloam/set-sddm-theme
+
+    # Create sudoers rule
+    echo "ALL ALL=(ALL) NOPASSWD: /usr/local/lib/gloam/set-sddm-theme" | \
+        sudo tee /etc/sudoers.d/gloam-sddm > /dev/null
+    sudo chmod 440 /etc/sudoers.d/gloam-sddm
+}
+
 apply_color_scheme() {
     local scheme="$1"
     plasma-apply-colorscheme "$scheme" >/dev/null 2>&1 || true
@@ -730,7 +778,8 @@ has_bundleable_options() {
        -n "${CURSOR_LIGHT:-}" || -n "${CURSOR_DARK:-}" || \
        -n "${STYLE_LIGHT:-}" || -n "${STYLE_DARK:-}" || \
        -n "${DECORATION_LIGHT:-}" || -n "${DECORATION_DARK:-}" || \
-       -n "${SPLASH_LIGHT:-}" || -n "${SPLASH_DARK:-}" ]]
+       -n "${SPLASH_LIGHT:-}" || -n "${SPLASH_DARK:-}" || \
+       -n "${SDDM_LIGHT:-}" || -n "${SDDM_DARK:-}" ]]
 }
 
 # Prompt user for global vs local theme install, authenticate sudo if needed
@@ -808,7 +857,7 @@ generate_custom_theme() {
     fi
 
     # Select user overrides based on mode
-    local color_scheme icon_theme cursor_theme plasma_style decoration splash_theme
+    local color_scheme icon_theme cursor_theme plasma_style decoration splash_theme sddm_theme
     if [[ "$mode" == "light" ]]; then
         color_scheme="${COLOR_LIGHT:-}"
         icon_theme="${ICON_LIGHT:-}"
@@ -816,6 +865,7 @@ generate_custom_theme() {
         plasma_style="${STYLE_LIGHT:-}"
         decoration="${DECORATION_LIGHT:-}"
         splash_theme="${SPLASH_LIGHT:-}"
+        sddm_theme="${SDDM_LIGHT:-}"
     else
         color_scheme="${COLOR_DARK:-}"
         icon_theme="${ICON_DARK:-}"
@@ -823,6 +873,7 @@ generate_custom_theme() {
         plasma_style="${STYLE_DARK:-}"
         decoration="${DECORATION_DARK:-}"
         splash_theme="${SPLASH_DARK:-}"
+        sddm_theme="${SDDM_DARK:-}"
     fi
 
     # Update metadata.json with new ID and name, preserving original authors
@@ -930,6 +981,9 @@ METADATA
         fi
     fi
 
+    # SDDM theme
+    [[ -n "$sddm_theme" ]] && update_defaults_key "[sddm][Theme]" "Current" "$sddm_theme"
+
     # Add panel layout
     local panel_config="${HOME}/.config/plasma-org.kde.plasma.desktop-appletsrc"
     if [[ -f "$panel_config" ]]; then
@@ -996,6 +1050,9 @@ apply_theme() {
         # Konsole - always apply (not bundleable)
         [[ -n "$KONSOLE_DARK" ]] && apply_konsole_profile "$KONSOLE_DARK"
 
+        # Login screen (SDDM) - always apply (system-level, not applied by plasma-apply-lookandfeel)
+        [[ -n "$SDDM_DARK" ]] && apply_sddm_theme "$SDDM_DARK"
+
         # Browser color scheme - always apply (not bundleable)
         apply_browser_color_scheme "dark"
 
@@ -1045,6 +1102,9 @@ apply_theme() {
 
         # Konsole - always apply (not bundleable)
         [[ -n "$KONSOLE_LIGHT" ]] && apply_konsole_profile "$KONSOLE_LIGHT"
+
+        # Login screen (SDDM) - always apply (system-level, not applied by plasma-apply-lookandfeel)
+        [[ -n "$SDDM_LIGHT" ]] && apply_sddm_theme "$SDDM_LIGHT"
 
         # Browser color scheme - always apply (not bundleable)
         apply_browser_color_scheme "light"
@@ -1197,6 +1257,7 @@ do_configure() {
     local configure_style=false
     local configure_decorations=false
     local configure_cursors=false
+    local configure_login=false
     local configure_widget=false
     local configure_shortcut=false
 
@@ -1208,6 +1269,7 @@ do_configure() {
             -o|--konsole)       configure_konsole=true; configure_all=false ;;
             -s|--script)        configure_script=true; configure_all=false ;;
             -S|--splash)        configure_splash=true; configure_all=false ;;
+            -l|--login)         configure_login=true; configure_all=false ;;
             -c|--colors)        configure_colors=true; configure_all=false ;;
             -p|--style)         configure_style=true; configure_all=false ;;
             -d|--decorations)   configure_decorations=true; configure_all=false ;;
@@ -1217,7 +1279,7 @@ do_configure() {
             help|-h|--help)     show_configure_help; exit 0 ;;
             *)
                 echo "Unknown option: $1" >&2
-                echo "Options: -k|--kvantum -p|--style -d|--decorations -c|--colors -i|--icons -C|--cursors -g|--gtk -o|--konsole -s|--script -S|--splash -w|--widget -K|--shortcut" >&2
+                echo "Options: -k|--kvantum -p|--style -d|--decorations -c|--colors -i|--icons -C|--cursors -g|--gtk -o|--konsole -s|--script -S|--splash -l|--login -w|--widget -K|--shortcut" >&2
                 exit 1
                 ;;
         esac
@@ -1707,6 +1769,61 @@ do_configure() {
     fi
     fi
 
+    # Select Login Screen (SDDM) Themes
+    if [[ "$configure_all" == true || "$configure_login" == true ]]; then
+    echo ""
+    read -rp "Configure login screen (SDDM) themes? (requires sudo) [y/N]: " choice
+    if [[ "$choice" =~ ^[Yy]$ ]]; then
+        echo "Scanning for SDDM themes..."
+        local sddm_ids=() sddm_names=()
+        while IFS='|' read -r id name; do
+            sddm_ids+=("$id")
+            sddm_names+=("$name")
+        done < <(scan_sddm_themes)
+
+        if [[ ${#sddm_ids[@]} -eq 0 ]]; then
+            echo -e "${YELLOW}No SDDM themes found in /usr/share/sddm/themes/${RESET}"
+            SDDM_LIGHT=""
+            SDDM_DARK=""
+        else
+            echo ""
+            echo -e "${BOLD}Available SDDM themes:${RESET}"
+            for i in "${!sddm_names[@]}"; do
+                printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${sddm_names[$i]}"
+            done
+
+            echo ""
+            read -rp "Select ☀️ LIGHT mode login theme [1-${#sddm_ids[@]}]: " choice
+            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#sddm_ids[@]} )); then
+                SDDM_LIGHT="${sddm_ids[$((choice - 1))]}"
+            else
+                SDDM_LIGHT=""
+            fi
+
+            read -rp "Select 🌙 DARK mode login theme [1-${#sddm_ids[@]}]: " choice
+            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#sddm_ids[@]} )); then
+                SDDM_DARK="${sddm_ids[$((choice - 1))]}"
+            else
+                SDDM_DARK=""
+            fi
+
+            # Set up sudoers rule for non-interactive SDDM switching
+            if [[ -n "${SDDM_LIGHT:-}" || -n "${SDDM_DARK:-}" ]]; then
+                echo ""
+                echo "Setting up passwordless sudo for SDDM theme switching..."
+                sudo -v || { echo -e "${RED}Sudo required for SDDM theme switching.${RESET}"; SDDM_LIGHT=""; SDDM_DARK=""; }
+                if [[ -n "${SDDM_LIGHT:-}" || -n "${SDDM_DARK:-}" ]]; then
+                    setup_sddm_sudoers
+                    echo -e "${GREEN}SDDM sudoers rule installed.${RESET}"
+                fi
+            fi
+        fi
+    else
+        SDDM_LIGHT=""
+        SDDM_DARK=""
+    fi
+    fi
+
     # Configure custom scripts
     if [[ "$configure_all" == true || "$configure_script" == true ]]; then
     echo ""
@@ -1747,7 +1864,7 @@ do_configure() {
     fi
 
     # Check if anything was configured
-    if [[ -z "${KVANTUM_LIGHT:-}" && -z "${KVANTUM_DARK:-}" && -z "${STYLE_LIGHT:-}" && -z "${STYLE_DARK:-}" && -z "${DECORATION_LIGHT:-}" && -z "${DECORATION_DARK:-}" && -z "${COLOR_LIGHT:-}" && -z "${COLOR_DARK:-}" && -z "${ICON_LIGHT:-}" && -z "${ICON_DARK:-}" && -z "${CURSOR_LIGHT:-}" && -z "${CURSOR_DARK:-}" && -z "${GTK_LIGHT:-}" && -z "${GTK_DARK:-}" && -z "${KONSOLE_LIGHT:-}" && -z "${KONSOLE_DARK:-}" && -z "${SPLASH_LIGHT:-}" && -z "${SPLASH_DARK:-}" && -z "${SCRIPT_LIGHT:-}" && -z "${SCRIPT_DARK:-}" ]]; then
+    if [[ -z "${KVANTUM_LIGHT:-}" && -z "${KVANTUM_DARK:-}" && -z "${STYLE_LIGHT:-}" && -z "${STYLE_DARK:-}" && -z "${DECORATION_LIGHT:-}" && -z "${DECORATION_DARK:-}" && -z "${COLOR_LIGHT:-}" && -z "${COLOR_DARK:-}" && -z "${ICON_LIGHT:-}" && -z "${ICON_DARK:-}" && -z "${CURSOR_LIGHT:-}" && -z "${CURSOR_DARK:-}" && -z "${GTK_LIGHT:-}" && -z "${GTK_DARK:-}" && -z "${KONSOLE_LIGHT:-}" && -z "${KONSOLE_DARK:-}" && -z "${SPLASH_LIGHT:-}" && -z "${SPLASH_DARK:-}" && -z "${SDDM_LIGHT:-}" && -z "${SDDM_DARK:-}" && -z "${SCRIPT_LIGHT:-}" && -z "${SCRIPT_DARK:-}" ]]; then
         echo ""
         echo "Nothing to configure. Exiting."
         exit 0
@@ -1765,6 +1882,7 @@ do_configure() {
     echo "    GTK: ${GTK_LIGHT:-unchanged}"
     echo "    Konsole: ${KONSOLE_LIGHT:-unchanged}"
     echo "    Splash: $(get_friendly_name splash "${SPLASH_LIGHT:-}")"
+    echo "    Login: $(get_friendly_name sddm "${SDDM_LIGHT:-}")"
     echo "    Script: ${SCRIPT_LIGHT:-unchanged}"
     echo -e "🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark")${RESET}"
     echo "    Kvantum: ${KVANTUM_DARK:-unchanged}"
@@ -1776,6 +1894,7 @@ do_configure() {
     echo "    GTK: ${GTK_DARK:-unchanged}"
     echo "    Konsole: ${KONSOLE_DARK:-unchanged}"
     echo "    Splash: $(get_friendly_name splash "${SPLASH_DARK:-}")"
+    echo "    Login: $(get_friendly_name sddm "${SDDM_DARK:-}")"
     echo "    Script: ${SCRIPT_DARK:-unchanged}"
 
     # Preserve values from config if doing partial reconfigure
@@ -1924,6 +2043,8 @@ KONSOLE_LIGHT=${KONSOLE_LIGHT:-}
 KONSOLE_DARK=${KONSOLE_DARK:-}
 SPLASH_LIGHT=${SPLASH_LIGHT:-}
 SPLASH_DARK=${SPLASH_DARK:-}
+SDDM_LIGHT=${SDDM_LIGHT:-}
+SDDM_DARK=${SDDM_DARK:-}
 SCRIPT_LIGHT=${SCRIPT_LIGHT:-}
 SCRIPT_DARK=${SCRIPT_DARK:-}
 CUSTOM_THEME_LIGHT=${CUSTOM_THEME_LIGHT:-}
@@ -2100,7 +2221,7 @@ do_remove() {
     local xdg_shortcuts="/etc/xdg/kglobalshortcutsrc"
 
     local needs_sudo=false
-    [[ -f "$global_service" || -f "$global_cli" || -d "$global_plasmoid" || -f "$global_shortcut" || -d "$global_theme_light" || -d "$global_theme_dark" || -f "$skel_config" || -L "$global_service_link" || -f "$GLOBAL_INSTALL_MARKER" || -d "$GLOBAL_SCRIPTS_DIR" ]] && needs_sudo=true
+    [[ -f "$global_service" || -f "$global_cli" || -d "$global_plasmoid" || -f "$global_shortcut" || -d "$global_theme_light" || -d "$global_theme_dark" || -f "$skel_config" || -L "$global_service_link" || -f "$GLOBAL_INSTALL_MARKER" || -d "$GLOBAL_SCRIPTS_DIR" || -f /etc/sudoers.d/gloam-sddm || -d /usr/local/lib/gloam ]] && needs_sudo=true
 
     if [[ "$needs_sudo" == true ]]; then
         # Warn about global installation
@@ -2172,6 +2293,10 @@ do_remove() {
 
     # Remove global scripts
     [[ -d "$GLOBAL_SCRIPTS_DIR" ]] && sudo rm -rf "$GLOBAL_SCRIPTS_DIR" && echo "Removed $GLOBAL_SCRIPTS_DIR"
+
+    # Remove SDDM sudoers rule and wrapper script
+    [[ -f /etc/sudoers.d/gloam-sddm ]] && sudo rm /etc/sudoers.d/gloam-sddm && echo "Removed /etc/sudoers.d/gloam-sddm"
+    [[ -d /usr/local/lib/gloam ]] && sudo rm -rf /usr/local/lib/gloam && echo "Removed /usr/local/lib/gloam"
 
     # Remove plasmoid, shortcut, and custom themes
     remove_plasmoid
@@ -2360,6 +2485,7 @@ do_status() {
         echo "    GTK: ${GTK_LIGHT:-unchanged}"
         echo "    Konsole: ${KONSOLE_LIGHT:-unchanged}"
         echo "    Splash: $(get_friendly_name splash "${SPLASH_LIGHT:-}")"
+        echo "    Login: $(get_friendly_name sddm "${SDDM_LIGHT:-}")"
         echo "    Script: ${SCRIPT_LIGHT:-unchanged}"
         echo -e "🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$LAF_DARK")${RESET} ($LAF_DARK)"
         echo "    Kvantum: ${KVANTUM_DARK:-unchanged}"
@@ -2371,6 +2497,7 @@ do_status() {
         echo "    GTK: ${GTK_DARK:-unchanged}"
         echo "    Konsole: ${KONSOLE_DARK:-unchanged}"
         echo "    Splash: $(get_friendly_name splash "${SPLASH_DARK:-}")"
+        echo "    Login: $(get_friendly_name sddm "${SDDM_DARK:-}")"
         echo "    Script: ${SCRIPT_DARK:-unchanged}"
     else
         echo "Configuration: not installed"
@@ -2392,6 +2519,7 @@ Options:
   -g, --gtk           Configure GTK themes only
   -o, --konsole       Configure Konsole profiles only
   -S, --splash        Configure splash screens only
+  -l, --login         Configure login screen (SDDM) themes
   -c, --colors        Configure color schemes only
   -p, --style         Configure Plasma styles only
   -d, --decorations   Configure window decorations only
