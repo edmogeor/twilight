@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # gloam.sh
-# gloam: a dark/light mode theme switcher for KDE Plasma's day/night cycle.
+# gloam: Syncs Kvantum, GTK, and custom scripts with Plasma 6's native light/dark (day/night) theme switching - and more.
 #   configure [options]  Scan themes, save config, generate watcher script, enable systemd service
 #                        Options: -k|--kvantum -i|--icons -g|--gtk -o|--konsole -s|--script -S|--splash -w|--widget -K|--shortcut
 #                        With no options, configures all. With options, only reconfigures specified types.
