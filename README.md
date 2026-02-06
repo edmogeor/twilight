@@ -1,10 +1,10 @@
 <div align="center">
-  <h1>twilight</h1>
+  <h1>gloam</h1>
   <p><b>A dark/light mode theme switcher for KDE Plasma's day/night cycle.</b></p>
   <img src="screenshots/example.gif" width="800" />
 </div>
 
-**twilight** hooks into KDE's built-in day/night mode to automatically synchronize theme components that otherwise wouldn't get switched, or that you want to override with different options than the global theme provides.
+**gloam** hooks into KDE's built-in day/night mode to automatically synchronize theme components that otherwise wouldn't get switched, or that you want to override with different options than the global theme provides.
 
 It generates custom Plasma Global Themes from your selections so KDE applies most overrides natively, and runs a lightweight background service to handle the rest (Kvantum, GTK, Konsole, Flatpak, browser color scheme, custom scripts).
 
@@ -63,8 +63,8 @@ flatpak install org.kde.KStyle.Kvantum
 Clone the repository and run the configuration wizard:
 
 ```bash
-git clone https://github.com/edmogeor/twilight.git
-cd twilight && ./twilight.sh configure
+git clone https://github.com/edmogeor/gloam.git
+cd gloam && ./gloam.sh configure
 ```
 
 The `configure` command will:
@@ -75,25 +75,25 @@ The `configure` command will:
 - Install the CLI to `~/.local/bin/` (or `/usr/local/bin/` for global installs).
 - Install the Light/Dark Mode Toggle panel widget (optional).
 - Add a keyboard shortcut (Meta+Shift+L) for quick toggling (optional).
-- Create and enable a systemd user service (`twilight.service`).
+- Create and enable a systemd user service (`gloam.service`).
 
 ### Partial Re-configuration
 
 You can re-configure specific components without going through the whole wizard:
 
 ```bash
-twilight configure --kvantum      # Kvantum themes
-twilight configure --style        # Plasma styles
-twilight configure --decorations  # Window decorations
-twilight configure --colors       # Color schemes
-twilight configure --cursors      # Cursor themes
-twilight configure --icons        # Icon themes
-twilight configure --gtk          # GTK themes
-twilight configure --konsole      # Konsole profiles
-twilight configure --splash       # Splash screen
-twilight configure --script       # Custom scripts
-twilight configure --widget       # Panel widget
-twilight configure --shortcut     # Keyboard shortcut
+gloam configure --kvantum      # Kvantum themes
+gloam configure --style        # Plasma styles
+gloam configure --decorations  # Window decorations
+gloam configure --colors       # Color schemes
+gloam configure --cursors      # Cursor themes
+gloam configure --icons        # Icon themes
+gloam configure --gtk          # GTK themes
+gloam configure --konsole      # Konsole profiles
+gloam configure --splash       # Splash screen
+gloam configure --script       # Custom scripts
+gloam configure --widget       # Panel widget
+gloam configure --shortcut     # Keyboard shortcut
 ```
 
 ## Usage
@@ -104,17 +104,17 @@ Once configured, the service runs in the background. You usually don't need to t
 
 | Command | Description |
 | :--- | :--- |
-| `twilight configure` | Run the setup wizard. |
-| `twilight status` | Show the service status and current theme configuration. |
-| `twilight light` | Switch to light mode (and sync all sub-themes). |
-| `twilight dark` | Switch to dark mode (and sync all sub-themes). |
-| `twilight toggle` | Toggle between light and dark modes (also via Meta+Shift+L). |
-| `twilight remove` | Stop the service and remove all installed files. |
-| `twilight watch` | Run the monitor in the foreground (used by the service). |
+| `gloam configure` | Run the setup wizard. |
+| `gloam status` | Show the service status and current theme configuration. |
+| `gloam light` | Switch to light mode (and sync all sub-themes). |
+| `gloam dark` | Switch to dark mode (and sync all sub-themes). |
+| `gloam toggle` | Toggle between light and dark modes (also via Meta+Shift+L). |
+| `gloam remove` | Stop the service and remove all installed files. |
+| `gloam watch` | Run the monitor in the foreground (used by the service). |
 
 ## How It Works
 
-1. During `configure`, twilight generates custom Plasma Global Themes that bundle your selected color scheme, icons, cursors, Plasma style, window decorations, and splash screen.
+1. During `configure`, gloam generates custom Plasma Global Themes that bundle your selected color scheme, icons, cursors, Plasma style, window decorations, and splash screen.
 2. These custom themes are set as your KDE day/night defaults, so Plasma applies most overrides natively when switching.
 3. A systemd service uses `inotifywait` to monitor `~/.config/kdeglobals` for changes.
 4. When a theme switch is detected, the service applies the remaining overrides that can't be bundled: Kvantum, GTK, browser color scheme, Konsole profiles, Flatpak themes, and custom scripts.
@@ -124,12 +124,12 @@ Once configured, the service runs in the background. You usually don't need to t
 To remove the service, configuration, and all installed files:
 
 ```bash
-twilight remove
+gloam remove
 ```
 
 ## Day/Night Wallpapers
 
-**Note:** twilight does not manage wallpapers, as KDE Plasma 6 handles day/night wallpaper switching natively through dynamic wallpapers.
+**Note:** gloam does not manage wallpapers, as KDE Plasma 6 handles day/night wallpaper switching natively through dynamic wallpapers.
 
 To set up automatic day/night wallpaper switching:
 

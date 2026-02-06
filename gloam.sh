@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# twilight.sh
-# twilight: a dark/light mode theme switcher for KDE Plasma's day/night cycle.
+# gloam.sh
+# gloam: a dark/light mode theme switcher for KDE Plasma's day/night cycle.
 #   configure [options]  Scan themes, save config, generate watcher script, enable systemd service
 #                        Options: -k|--kvantum -i|--icons -g|--gtk -o|--konsole -s|--script -S|--splash -w|--widget -K|--shortcut
 #                        With no options, configures all. With options, only reconfigures specified types.
@@ -25,14 +25,14 @@ SET_SYSTEM_DEFAULTS=false
 SELECTED_USERS=()
 
 # Global installation marker file
-GLOBAL_INSTALL_MARKER="/etc/twilight.admin"
+GLOBAL_INSTALL_MARKER="/etc/gloam.admin"
 
 # Global scripts directory
-GLOBAL_SCRIPTS_DIR="/usr/local/share/twilight"
+GLOBAL_SCRIPTS_DIR="/usr/local/share/gloam"
 
 # Log file
 LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}"
-LOG_FILE="${LOG_DIR}/twilight.log"
+LOG_FILE="${LOG_DIR}/gloam.log"
 LOG_MAX_SIZE=102400  # 100KB
 
 log() {
@@ -48,17 +48,17 @@ log() {
 
 # Base paths (may be overridden by global install)
 KVANTUM_DIR="${HOME}/.config/Kvantum"
-CONFIG_FILE="${HOME}/.config/twilight.conf"
-SERVICE_NAME="twilight"
+CONFIG_FILE="${HOME}/.config/gloam.conf"
+SERVICE_NAME="gloam"
 PLASMOID_ID="org.kde.plasma.lightdarktoggle"
-SHORTCUT_ID="twilight-toggle.desktop"
+SHORTCUT_ID="gloam-toggle.desktop"
 
 # Path helper functions
 get_cli_path() {
     if [[ "$INSTALL_GLOBAL" == true ]]; then
-        echo "/usr/local/bin/twilight"
+        echo "/usr/local/bin/gloam"
     else
-        echo "${HOME}/.local/bin/twilight"
+        echo "${HOME}/.local/bin/gloam"
     fi
 }
 
@@ -72,9 +72,9 @@ get_plasmoid_path() {
 
 get_desktop_file_path() {
     if [[ "$INSTALL_GLOBAL" == true ]]; then
-        echo "/usr/share/applications/twilight-toggle.desktop"
+        echo "/usr/share/applications/gloam-toggle.desktop"
     else
-        echo "${HOME}/.local/share/applications/twilight-toggle.desktop"
+        echo "${HOME}/.local/share/applications/gloam-toggle.desktop"
     fi
 }
 
@@ -208,7 +208,7 @@ push_config_to_users() {
     for entry in "${SELECTED_USERS[@]}"; do
         local username="${entry%%:*}"
         local homedir="${entry#*:}"
-        local target_config="${homedir}/.config/twilight.conf"
+        local target_config="${homedir}/.config/gloam.conf"
         local target_service_dir="${homedir}/.config/systemd/user"
         local target_service="${target_service_dir}/${SERVICE_NAME}.service"
 
@@ -260,7 +260,7 @@ set_system_defaults() {
 
     # Copy config file to /etc/skel so new users get it
     sudo mkdir -p /etc/skel/.config
-    sudo cp "$CONFIG_FILE" /etc/skel/.config/twilight.conf
+    sudo cp "$CONFIG_FILE" /etc/skel/.config/gloam.conf
 
     # Auto-enable service for all users via default.target.wants symlink
     local service_file="/etc/systemd/user/${SERVICE_NAME}.service"
@@ -482,7 +482,7 @@ install_shortcut() {
     local desktop_content="[Desktop Entry]
 Type=Application
 Name=Light/Dark Mode Toggle
-Exec=twilight toggle
+Exec=gloam toggle
 NoDisplay=true
 StartupNotify=false
 X-KDE-GlobalAccel-CommandShortcut=true"
@@ -503,8 +503,8 @@ X-KDE-GlobalAccel-CommandShortcut=true"
 }
 
 remove_shortcut() {
-    local local_file="${HOME}/.local/share/applications/twilight-toggle.desktop"
-    local global_file="/usr/share/applications/twilight-toggle.desktop"
+    local local_file="${HOME}/.local/share/applications/gloam-toggle.desktop"
+    local global_file="/usr/share/applications/gloam-toggle.desktop"
 
     [[ -f "$local_file" ]] && rm -f "$local_file" && echo "Removed $local_file"
     [[ -f "$global_file" ]] && sudo rm -f "$global_file" && echo "Removed $global_file"
@@ -865,7 +865,7 @@ METADATA
     # Helper to update a key in defaults file
     update_defaults_key() {
         local section="$1" key="$2" value="$3"
-        local tmpfile="/tmp/twilight-defaults.tmp"
+        local tmpfile="/tmp/gloam-defaults.tmp"
 
         local awk_script='
         BEGIN { in_section=0; key_done=0; section_found=0 }
@@ -1012,7 +1012,7 @@ apply_theme() {
         fi
 
         dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh
-        echo "dark" > "${XDG_RUNTIME_DIR}/twilight-runtime"
+        echo "dark" > "${XDG_RUNTIME_DIR}/gloam-runtime"
         log "Switched to DARK mode"
 
     elif [[ "$laf" == "$LAF_LIGHT" ]]; then
@@ -1062,7 +1062,7 @@ apply_theme() {
         fi
 
         dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh
-        echo "light" > "${XDG_RUNTIME_DIR}/twilight-runtime"
+        echo "light" > "${XDG_RUNTIME_DIR}/gloam-runtime"
         log "Switched to LIGHT mode"
     else
         log "Unknown LookAndFeel: $laf — skipping"
@@ -1173,7 +1173,7 @@ clean_app_overrides() {
     while read -r file; do
         [[ -f "$file" ]] || continue
         local filename=$(basename "$file")
-        [[ "$filename" == "kdeglobals" || "$filename" == "twilight.conf" ]] && continue
+        [[ "$filename" == "kdeglobals" || "$filename" == "gloam.conf" ]] && continue
         if grep -qE "^(ColorScheme|Color Theme)=" "$file" 2>/dev/null; then
             sed -i -E '/^(ColorScheme|Color Theme)=/d' "$file"
         fi
@@ -1244,7 +1244,7 @@ do_configure() {
                 cleanup_stale
             else
                 echo "Use configure options to modify specific settings (e.g. --kvantum, --gtk)."
-                echo "Run 'twilight help' for available options."
+                echo "Run 'gloam help' for available options."
                 exit 0
             fi
         else
@@ -1942,7 +1942,7 @@ EOF
 
     # Check if already installed
     local installed_previously=false
-    if [[ -x "$cli_path" ]] || [[ -x "${HOME}/.local/bin/twilight" ]] || [[ -x "/usr/local/bin/twilight" ]]; then
+    if [[ -x "$cli_path" ]] || [[ -x "${HOME}/.local/bin/gloam" ]] || [[ -x "/usr/local/bin/gloam" ]]; then
         installed_previously=true
     fi
 
@@ -1950,7 +1950,7 @@ EOF
     if [[ "$configure_widget" == true || "$configure_shortcut" == true ]] && [[ "$configure_all" == false ]]; then
         if [[ "$installed_previously" == false ]]; then
             echo -e "${RED}Error: Widget and shortcut require the CLI to be installed first.${RESET}" >&2
-            echo "Run 'twilight configure' first." >&2
+            echo "Run 'gloam configure' first." >&2
             exit 1
         fi
         # Update the script
@@ -1981,9 +1981,9 @@ EOF
         # Install the CLI
         local install_cli_prompt
         if [[ "$INSTALL_GLOBAL" == true ]]; then
-            install_cli_prompt="Install 'twilight' to /usr/local/bin?"
+            install_cli_prompt="Install 'gloam' to /usr/local/bin?"
         else
-            install_cli_prompt="Install 'twilight' to ~/.local/bin?"
+            install_cli_prompt="Install 'gloam' to ~/.local/bin?"
         fi
 
         echo ""
@@ -2091,12 +2091,12 @@ do_remove() {
     # Check if any global files exist and request sudo once if needed
     local global_service="/etc/systemd/user/${SERVICE_NAME}.service"
     local global_service_link="/etc/systemd/user/default.target.wants/${SERVICE_NAME}.service"
-    local global_cli="/usr/local/bin/twilight"
+    local global_cli="/usr/local/bin/gloam"
     local global_plasmoid="/usr/share/plasma/plasmoids/${PLASMOID_ID}"
-    local global_shortcut="/usr/share/applications/twilight-toggle.desktop"
+    local global_shortcut="/usr/share/applications/gloam-toggle.desktop"
     local global_theme_light="/usr/share/plasma/look-and-feel/org.kde.custom.light"
     local global_theme_dark="/usr/share/plasma/look-and-feel/org.kde.custom.dark"
-    local skel_config="/etc/skel/.config/twilight.conf"
+    local skel_config="/etc/skel/.config/gloam.conf"
     local xdg_shortcuts="/etc/xdg/kglobalshortcutsrc"
 
     local needs_sudo=false
@@ -2166,7 +2166,7 @@ do_remove() {
     [[ -f "$global_service" ]] && sudo rm "$global_service" && echo "Removed $global_service"
 
     # Remove CLI
-    local local_cli="${HOME}/.local/bin/twilight"
+    local local_cli="${HOME}/.local/bin/gloam"
     [[ -f "$local_cli" ]] && rm "$local_cli" && echo "Removed $local_cli"
     [[ -f "$global_cli" ]] && sudo rm "$global_cli" && echo "Removed $global_cli"
 
@@ -2225,8 +2225,8 @@ do_status() {
     echo -e "${BOLD}Installation locations:${RESET}"
 
     # CLI location
-    local local_cli="${HOME}/.local/bin/twilight"
-    local global_cli="/usr/local/bin/twilight"
+    local local_cli="${HOME}/.local/bin/gloam"
+    local global_cli="/usr/local/bin/gloam"
     if [[ -x "$global_cli" ]]; then
         echo -e "    CLI: ${GREEN}$global_cli (global)${RESET}"
     elif [[ -x "$local_cli" ]]; then
@@ -2258,8 +2258,8 @@ do_status() {
     fi
 
     # Shortcut location
-    local local_shortcut="${HOME}/.local/share/applications/twilight-toggle.desktop"
-    local global_shortcut="/usr/share/applications/twilight-toggle.desktop"
+    local local_shortcut="${HOME}/.local/share/applications/gloam-toggle.desktop"
+    local global_shortcut="/usr/share/applications/gloam-toggle.desktop"
     if [[ -f "$global_shortcut" ]]; then
         echo -e "    Keyboard shortcut: ${GREEN}installed (global)${RESET} (Meta+Shift+L)"
     elif [[ -f "$local_shortcut" ]]; then
@@ -2310,7 +2310,7 @@ do_status() {
 
     # Check system defaults for new users
     local xdg_globals="/etc/xdg/kdeglobals"
-    local skel_config="/etc/skel/.config/twilight.conf"
+    local skel_config="/etc/skel/.config/gloam.conf"
     local service_link="/etc/systemd/user/default.target.wants/${SERVICE_NAME}.service"
 
     local sys_defaults_set=false
@@ -2414,7 +2414,7 @@ EOF
 
 show_help() {
     cat <<EOF
-twilight - A dark/light mode theme switcher for KDE Plasma's day/night cycle
+gloam - A dark/light mode theme switcher for KDE Plasma's day/night cycle
 
 Usage: $0 <command> [options]
 

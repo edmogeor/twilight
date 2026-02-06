@@ -1,5 +1,5 @@
 /*
- * Light/Dark Mode Toggle Plasmoid for twilight
+ * Light/Dark Mode Toggle Plasmoid for gloam
  * SPDX-License-Identifier: GPL-3.0
  */
 import QtQuick
@@ -31,7 +31,7 @@ PlasmoidItem {
         modeWatcher.running = true
     }
 
-    // Read mode from status file (written by twilight script)
+    // Read mode from status file (written by gloam script)
     Plasma5Support.DataSource {
         id: modeReader
         engine: "executable"
@@ -49,7 +49,7 @@ PlasmoidItem {
         }
 
         function checkMode() {
-            connectSource("cat $XDG_RUNTIME_DIR/twilight-runtime 2>/dev/null")
+            connectSource("cat $XDG_RUNTIME_DIR/gloam-runtime 2>/dev/null")
         }
     }
 
@@ -78,9 +78,9 @@ PlasmoidItem {
         if (isRunning) return
         isRunning = true
         if (isDarkMode) {
-            toggleRunner.connectSource("twilight light")
+            toggleRunner.connectSource("gloam light")
         } else {
-            toggleRunner.connectSource("twilight dark")
+            toggleRunner.connectSource("gloam dark")
         }
     }
 

@@ -8,7 +8,7 @@
             }
         ],
         "Category": "Utilities",
-        "Description": "Toggle between light and dark themes",
+        "Description": "Toggle between light and dark themes for gloam",
         "Icon": "weather-clear",
         "Id": "org.kde.plasma.lightdarktoggle",
         "License": "GPL-3.0",
