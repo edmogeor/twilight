@@ -46,6 +46,36 @@ log() {
     echo "$msg" >> "$LOG_FILE"
 }
 
+warn() {
+    local msg="$*"
+    echo -e "${YELLOW}Warning: ${msg}${RESET}" >&2
+    log "WARN: $msg"
+}
+
+die() {
+    local msg="$*"
+    echo -e "${RED}Error: ${msg}${RESET}" >&2
+    log "ERROR: $msg"
+    exit 1
+}
+
+# Temp file tracking and cleanup
+GLOAM_TMPFILES=()
+
+gloam_mktemp() {
+    local f
+    f=$(mktemp /tmp/gloam-XXXXXXXX)
+    GLOAM_TMPFILES+=("$f")
+    echo "$f"
+}
+
+cleanup() {
+    for f in "${GLOAM_TMPFILES[@]}"; do
+        [[ -f "$f" ]] && rm -f "$f"
+    done
+}
+trap cleanup EXIT INT TERM
+
 # Base paths (may be overridden by global install)
 KVANTUM_DIR="${HOME}/.config/Kvantum"
 CONFIG_FILE="${HOME}/.config/gloam.conf"
@@ -352,8 +382,8 @@ push_config_to_users() {
         fi
 
         # Enable service for user (will take effect on their next login)
-        sudo -u "$username" systemctl --user daemon-reload 2>/dev/null || true
-        sudo -u "$username" systemctl --user enable "$SERVICE_NAME" 2>/dev/null || true
+        sudo -u "$username" systemctl --user daemon-reload 2>/dev/null || warn "Failed to daemon-reload for user: $username"
+        sudo -u "$username" systemctl --user enable "$SERVICE_NAME" 2>/dev/null || warn "Failed to enable service for user: $username"
 
         echo -e "    ${GREEN}Done${RESET}"
     done
@@ -967,19 +997,18 @@ cleanup_stale() {
 
 check_desktop_environment() {
     if [[ "$XDG_CURRENT_DESKTOP" != *"KDE"* ]]; then
-        echo -e "${RED}Error: This script requires KDE Plasma desktop environment.${RESET}" >&2
-        exit 1
+        die "This script requires KDE Plasma desktop environment."
     fi
 }
 
 check_dependencies() {
     local missing=()
     command -v inotifywait &>/dev/null || missing+=("inotify-tools")
+    command -v kreadconfig6 &>/dev/null || missing+=("kreadconfig6")
+    command -v kwriteconfig6 &>/dev/null || missing+=("kwriteconfig6")
 
     if [[ ${#missing[@]} -gt 0 ]]; then
-        echo -e "${RED}Error: Missing dependencies:${RESET}" >&2
-        printf '  - %s\n' "${missing[@]}" >&2
-        exit 1
+        die "Missing dependencies:\n$(printf '  - %s\n' "${missing[@]}")"
     fi
 }
 
@@ -1131,17 +1160,17 @@ apply_sddm_theme() {
         # Delay to let KDE finish applying LookAndFeel
         sleep 1.5
         if [[ -x /usr/local/lib/gloam/set-sddm-theme ]]; then
-            sudo /usr/local/lib/gloam/set-sddm-theme "$theme" 2>/dev/null || true
+            sudo /usr/local/lib/gloam/set-sddm-theme "$theme" 2>/dev/null || warn "Failed to apply SDDM theme: $theme"
         else
             sudo kwriteconfig6 --file /etc/sddm.conf.d/kde_settings.conf \
-                --group Theme --key Current "$theme" 2>/dev/null || true
+                --group Theme --key Current "$theme" 2>/dev/null || warn "Failed to apply SDDM theme: $theme"
         fi
     fi
 }
 
 apply_desktop_wallpaper() {
     local wallpaper_dir="$1"
-    plasma-apply-wallpaperimage "$wallpaper_dir" >/dev/null 2>&1 || true
+    plasma-apply-wallpaperimage "$wallpaper_dir" >/dev/null 2>&1 || warn "Failed to apply desktop wallpaper: $wallpaper_dir"
 }
 
 apply_lockscreen_wallpaper() {
@@ -1186,7 +1215,7 @@ apply_sddm_wallpaper() {
     local image="$1"
     if [[ -n "$image" && -f "$image" ]]; then
         if [[ -x /usr/local/lib/gloam/set-sddm-background ]]; then
-            sudo /usr/local/lib/gloam/set-sddm-background "$image" 2>/dev/null || true
+            sudo /usr/local/lib/gloam/set-sddm-background "$image" 2>/dev/null || warn "Failed to apply SDDM background: $image"
         fi
     fi
 }
@@ -1279,22 +1308,22 @@ SCRIPT
 
 apply_color_scheme() {
     local scheme="$1"
-    plasma-apply-colorscheme "$scheme" >/dev/null 2>&1 || true
+    plasma-apply-colorscheme "$scheme" >/dev/null 2>&1 || warn "Failed to apply color scheme: $scheme"
 }
 
 apply_plasma_style() {
     local style="$1"
-    plasma-apply-desktoptheme "$style" >/dev/null 2>&1 || true
+    plasma-apply-desktoptheme "$style" >/dev/null 2>&1 || warn "Failed to apply plasma style: $style"
 }
 
 apply_cursor_theme() {
     local theme="$1"
-    plasma-apply-cursortheme "$theme" >/dev/null 2>&1 || true
+    plasma-apply-cursortheme "$theme" >/dev/null 2>&1 || warn "Failed to apply cursor theme: $theme"
 }
 
 apply_window_decoration() {
     local decoration="$1"
-    /usr/lib/kwin-applywindowdecoration "$decoration" >/dev/null 2>&1 || true
+    /usr/lib/kwin-applywindowdecoration "$decoration" >/dev/null 2>&1 || warn "Failed to apply window decoration: $decoration"
 }
 
 
@@ -1420,7 +1449,7 @@ generate_custom_theme() {
 
     # Update metadata.json with new ID and name, preserving original authors
     local author_block author_name author_email original_authors
-    author_block=$(awk '/"Authors"/,/\]/' "${base_theme_dir}/metadata.json" 2>/dev/null) || true
+    author_block=$(awk '/"Authors"/,/\]/' "${base_theme_dir}/metadata.json" 2>/dev/null) || log "WARN: Could not extract author block from ${base_theme_dir}/metadata.json"
     author_name=$(echo "$author_block" | grep -m1 '"Name"[[:space:]]*:' | sed 's/.*"Name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/') || true
     author_email=$(echo "$author_block" | grep -m1 '"Email"[[:space:]]*:' | sed 's/.*"Email"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/') || true
     [[ -z "$author_name" ]] && author_name="Unknown"
@@ -1459,7 +1488,8 @@ METADATA
     # Helper to update a key in defaults file
     update_defaults_key() {
         local section="$1" key="$2" value="$3"
-        local tmpfile="/tmp/gloam-defaults.tmp"
+        local tmpfile
+        tmpfile=$(gloam_mktemp)
 
         local awk_script='
         BEGIN { in_section=0; key_done=0; section_found=0 }
@@ -1604,7 +1634,7 @@ METADATA
                 fi
             done
             [[ "$THEME_INSTALL_GLOBAL" == true && "$icon_src" != /usr/share/icons/* ]] && \
-                "$PLASMA_CHANGEICONS" "$icon_theme" >/dev/null 2>&1 || true
+                "$PLASMA_CHANGEICONS" "$icon_theme" >/dev/null 2>&1 || warn "Failed to re-apply icon theme: $icon_theme"
         fi
     fi
 
@@ -1659,7 +1689,7 @@ METADATA
                 fi
             done
             [[ "$THEME_INSTALL_GLOBAL" == true && "$cursor_src" != /usr/share/icons/* ]] && \
-                plasma-apply-cursortheme "$cursor_theme" >/dev/null 2>&1 || true
+                plasma-apply-cursortheme "$cursor_theme" >/dev/null 2>&1 || warn "Failed to re-apply cursor theme: $cursor_theme"
         fi
     fi
 
@@ -1826,6 +1856,7 @@ remove_wallpaper_packs() {
 apply_theme() {
     local laf="$1"
     local initial="${2:-false}"  # true on startup, skips browser signal to avoid feedback loop
+    log "Applying theme: $laf (initial=$initial)"
     # Wait for LookAndFeel to finish applying before overriding settings
     sleep 0.5
 
@@ -1900,7 +1931,7 @@ apply_theme() {
             log "Dark script not executable: $SCRIPT_DARK"
         fi
 
-        dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh
+        dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh 2>/dev/null || log "WARN: dbus forceRefresh signal failed"
         echo "dark" > "${XDG_RUNTIME_DIR}/gloam-runtime"
         log "Switched to DARK mode"
 
@@ -1971,7 +2002,7 @@ apply_theme() {
             log "Light script not executable: $SCRIPT_LIGHT"
         fi
 
-        dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh
+        dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh 2>/dev/null || log "WARN: dbus forceRefresh signal failed"
         echo "light" > "${XDG_RUNTIME_DIR}/gloam-runtime"
         log "Switched to LIGHT mode"
     else
@@ -1981,15 +2012,13 @@ apply_theme() {
 
 do_watch() {
     if [[ ! -f "$CONFIG_FILE" ]]; then
-        echo "Error: No config found at $CONFIG_FILE. Run configure first." >&2
-        exit 1
+        die "No config found at $CONFIG_FILE. Run configure first."
     fi
     # shellcheck source=/dev/null
     source "$CONFIG_FILE"
 
     if ! command -v inotifywait &>/dev/null; then
-        echo "Error: inotifywait not found. Install inotify-tools." >&2
-        exit 1
+        die "inotifywait not found. Install inotify-tools."
     fi
 
     log "Watcher started"
@@ -2023,8 +2052,7 @@ do_watch() {
 
 load_config_strict() {
     if [[ ! -f "$CONFIG_FILE" ]]; then
-        echo -e "${RED}Error: No config found at $CONFIG_FILE. Run configure first.${RESET}" >&2
-        exit 1
+        die "No config found at $CONFIG_FILE. Run configure first."
     fi
     # shellcheck source=/dev/null
     source "$CONFIG_FILE"
