@@ -385,7 +385,7 @@ push_config_to_users() {
     for variant in light dark; do
         local theme_dir_variant="${THEME_INSTALL_DIR:-}/org.kde.custom.${variant}"
         local sddm_src
-        sddm_src=$(compgen -G "${theme_dir_variant}/contents/sddm/sddm-bg-${variant}.*" 2>/dev/null | head -1)
+        sddm_src=$({ compgen -G "${theme_dir_variant}/contents/sddm/sddm-bg-${variant}.*" 2>/dev/null || true; } | head -1)
         if [[ -n "$sddm_src" && -f "$sddm_src" ]]; then
             sudo mkdir -p /usr/local/lib/gloam
             sudo cp "$sddm_src" "/usr/local/lib/gloam/"
@@ -1714,7 +1714,7 @@ bundle_wallpapers_and_sddm() {
     local theme_dir_dark="${THEME_INSTALL_DIR}/org.kde.custom.dark"
     for variant in light dark; do
         local sddm_bg
-        sddm_bg=$(compgen -G "/usr/local/lib/gloam/sddm-bg-${variant}.*" 2>/dev/null | head -1)
+        sddm_bg=$({ compgen -G "/usr/local/lib/gloam/sddm-bg-${variant}.*" 2>/dev/null || true; } | head -1)
         [[ -n "$sddm_bg" && -f "$sddm_bg" ]] || continue
 
         local target_theme_dir
@@ -1813,7 +1813,7 @@ apply_theme() {
             # SDDM - always explicit (not handled by custom theme defaults)
             if is_gloam_wallpaper sddm; then
                 local sddm_bg_dark
-                sddm_bg_dark=$(compgen -G "/usr/local/lib/gloam/sddm-bg-dark.*" | head -1)
+                sddm_bg_dark=$({ compgen -G "/usr/local/lib/gloam/sddm-bg-dark.*" || true; } | head -1)
                 [[ -n "$sddm_bg_dark" ]] && apply_sddm_wallpaper "$sddm_bg_dark"
             fi
         fi
@@ -1884,7 +1884,7 @@ apply_theme() {
             # SDDM - always explicit (not handled by custom theme defaults)
             if is_gloam_wallpaper sddm; then
                 local sddm_bg_light
-                sddm_bg_light=$(compgen -G "/usr/local/lib/gloam/sddm-bg-light.*" | head -1)
+                sddm_bg_light=$({ compgen -G "/usr/local/lib/gloam/sddm-bg-light.*" || true; } | head -1)
                 [[ -n "$sddm_bg_light" ]] && apply_sddm_wallpaper "$sddm_bg_light"
             fi
         fi
@@ -2065,6 +2065,7 @@ do_configure() {
     local configure_shortcut=false
     local configure_appstyle=false
     local configure_wallpaper=false
+    local IMPORT_CONFIG=""
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -2083,10 +2084,11 @@ do_configure() {
             -C|--cursors)       configure_cursors=true; configure_all=false ;;
             -w|--widget)        configure_widget=true; configure_all=false ;;
             -K|--shortcut)      configure_shortcut=true; configure_all=false ;;
+            --import)           shift; IMPORT_CONFIG="$1" ;;
             help|-h|--help)     show_configure_help; exit 0 ;;
             *)
                 echo "Unknown option: $1" >&2
-                echo "Options: -c|--colors -k|--kvantum -a|--appstyle -g|--gtk -p|--style -d|--decorations -i|--icons -C|--cursors -S|--splash -l|--login -W|--wallpaper -o|--konsole -s|--script -w|--widget -K|--shortcut" >&2
+                echo "Options: -c|--colors -k|--kvantum -a|--appstyle -g|--gtk -p|--style -d|--decorations -i|--icons -C|--cursors -S|--splash -l|--login -W|--wallpaper -o|--konsole -s|--script -w|--widget -K|--shortcut --import <file>" >&2
                 exit 1
                 ;;
         esac
@@ -2120,6 +2122,37 @@ do_configure() {
             cleanup_stale
         fi
     fi
+
+    # Handle config import - source the file and skip all interactive questions
+    if [[ -n "${IMPORT_CONFIG}" ]]; then
+        if [[ ! -f "$IMPORT_CONFIG" ]]; then
+            echo -e "${RED}Error: Config file not found: $IMPORT_CONFIG${RESET}"
+            exit 1
+        fi
+        echo -e "${BLUE}Importing configuration from ${IMPORT_CONFIG}...${RESET}"
+        # shellcheck source=/dev/null
+        source "$IMPORT_CONFIG"
+        # Authenticate sudo if config requires global installation
+        if [[ "${INSTALL_GLOBAL:-false}" == true ]]; then
+            echo "Config requires global installation, requesting sudo..."
+            sudo -v || { echo -e "${RED}Sudo required for global installation.${RESET}"; exit 1; }
+        fi
+        # Set LAF variables for post-config steps
+        local laf_light laf_dark
+        laf_light="${LAF_LIGHT:-}"
+        laf_dark="${LAF_DARK:-}"
+        if [[ -z "$laf_light" || -z "$laf_dark" ]]; then
+            echo -e "${RED}Error: Imported config is missing LAF_LIGHT or LAF_DARK.${RESET}"
+            exit 1
+        fi
+        echo -e "  ☀️ Light theme: ${BOLD}$(get_friendly_name laf "$laf_light")${RESET}"
+        echo -e "  🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark")${RESET}"
+
+        # Remove app-specific overrides so they follow the global theme
+        clean_app_overrides
+    fi
+
+    if [[ -z "${IMPORT_CONFIG}" ]]; then
 
     show_laf_reminder
 
@@ -2962,6 +2995,8 @@ do_configure() {
         fi
     fi
 
+    fi # end of interactive block (skipped during --import)
+
     # Store LAF values for push_config_to_users and set_system_defaults
     LAF_LIGHT="$laf_light"
     LAF_DARK="$laf_dark"
@@ -3594,6 +3629,7 @@ Options:
   -s, --script        Configure custom scripts only
   -w, --widget        Install/reinstall panel widget
   -K, --shortcut      Install/reinstall keyboard shortcut (Meta+Shift+L)
+      --import <file>  Import an existing gloam.conf and skip interactive setup
 
 Panel Widget:
   During configuration, if you install the command globally (~/.local/bin),
@@ -3604,6 +3640,8 @@ Examples:
   $0 configure              Configure all theme options
   $0 configure -k -i        Configure only Kvantum and icon themes
   $0 configure --splash     Configure only splash screens
+  $0 configure --import /path/to/gloam.conf
+                            Import config from another machine/user
 EOF
 }
 
