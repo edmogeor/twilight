@@ -3225,7 +3225,7 @@ do_remove() {
                     if [[ ! -d "${_moved_from}/${_restore_name}" ]]; then
                         mkdir -p "$_moved_from"
                         sudo cp -r "$_global_path" "${_moved_from}/${_restore_name}"
-                        chown -R "$(id -u):$(id -g)" "${_moved_from}/${_restore_name}"
+                        sudo chown -R "$(id -u):$(id -g)" "${_moved_from}/${_restore_name}"
                         echo "Restored ${_restore_name} to ${_moved_from}/"
                     fi
                     sudo rm -rf "$_global_path"
