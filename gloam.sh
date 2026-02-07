@@ -158,6 +158,22 @@ ask_global_install() {
 
         # Ask about system defaults for new users
         ask_system_defaults
+
+        # Ask about copying desktop settings if either push or defaults was selected
+        if [[ "${PUSH_TO_USERS:-}" == true || "${SET_SYSTEM_DEFAULTS:-}" == true ]]; then
+            echo ""
+            echo -e "${BOLD}Copy Desktop Settings${RESET}"
+            echo "Copy the following settings to new/existing users:"
+            echo "  - Panel layout, positions and widgets (plasmoids)"
+            echo "  - Mouse and touchpad settings"
+            echo "  - Window manager effects and tiling"
+            echo "  - Keyboard shortcuts"
+            echo "  - Desktop and lock screen wallpapers"
+            echo "  - App settings (Dolphin, Konsole, KRunner)"
+            echo ""
+            read -rp "Copy desktop settings? [y/N]: " desktop_choice
+            [[ "$desktop_choice" =~ ^[Yy]$ ]] && COPY_DESKTOP_LAYOUT=true
+        fi
     fi
 }
 
@@ -230,11 +246,55 @@ push_config_to_users() {
         sudo -u "$username" kwriteconfig6 --file "${homedir}/.config/kdeglobals" \
             --group KDE --key AutomaticLookAndFeel true 2>/dev/null || true
 
-        # Copy panel layout so user gets the admin's desktop on next login
-        local panel_config="${HOME}/.config/plasma-org.kde.plasma.desktop-appletsrc"
-        if [[ -f "$panel_config" ]]; then
-            sudo cp "$panel_config" "${homedir}/.config/plasma-org.kde.plasma.desktop-appletsrc"
-            sudo chown "$username:" "${homedir}/.config/plasma-org.kde.plasma.desktop-appletsrc"
+        # Copy desktop settings if requested
+        if [[ "${COPY_DESKTOP_LAYOUT:-}" == true ]]; then
+            # Panel applet layout (with wallpaper path rewrite)
+            local panel_config="${HOME}/.config/plasma-org.kde.plasma.desktop-appletsrc"
+            if [[ -f "$panel_config" ]]; then
+                sudo cp "$panel_config" "${homedir}/.config/plasma-org.kde.plasma.desktop-appletsrc"
+                sudo sed -i 's|Image=file://.*/wallpapers/gloam-|Image=file:///usr/share/wallpapers/gloam-|g' \
+                    "${homedir}/.config/plasma-org.kde.plasma.desktop-appletsrc"
+                sudo chown "$username:" "${homedir}/.config/plasma-org.kde.plasma.desktop-appletsrc"
+            fi
+
+            # UX config files (panels, input, window manager, shortcuts, apps)
+            local ux_configs=(
+                plasmashellrc
+                kcminputrc
+                kwinrc
+                kglobalshortcutsrc
+                kscreenlockerrc
+                krunnerrc
+                dolphinrc
+                konsolerc
+                breezerc
+            )
+            for cfg in "${ux_configs[@]}"; do
+                [[ -f "${HOME}/.config/${cfg}" ]] || continue
+                sudo cp "${HOME}/.config/${cfg}" "${homedir}/.config/${cfg}"
+                sudo chown "$username:" "${homedir}/.config/${cfg}"
+            done
+
+            # Rewrite gloam wallpaper paths in lock screen config
+            if [[ -f "${homedir}/.config/kscreenlockerrc" ]]; then
+                sudo sed -i 's|Image=file://.*/wallpapers/gloam-|Image=file:///usr/share/wallpapers/gloam-|g' \
+                    "${homedir}/.config/kscreenlockerrc"
+            fi
+
+            # Set lockscreen wallpaper if not already a gloam wallpaper
+            if [[ "${WALLPAPER:-}" == true ]] && ! grep -q 'wallpapers/gloam-' "${homedir}/.config/kscreenlockerrc" 2>/dev/null; then
+                sudo -u "$username" kwriteconfig6 --file "${homedir}/.config/kscreenlockerrc" \
+                    --group Greeter --group Wallpaper --group org.kde.image --group General \
+                    --key Image "file:///usr/share/wallpapers/gloam-dynamic" 2>/dev/null || true
+            fi
+
+            # Custom plasmoids so panel widgets work
+            local plasmoids_dir="${HOME}/.local/share/plasma/plasmoids"
+            if [[ -d "$plasmoids_dir" ]] && [[ -n "$(ls -A "$plasmoids_dir" 2>/dev/null)" ]]; then
+                sudo mkdir -p "${homedir}/.local/share/plasma/plasmoids"
+                sudo cp -r "$plasmoids_dir"/* "${homedir}/.local/share/plasma/plasmoids/"
+                sudo chown -R "$username:" "${homedir}/.local/share/plasma"
+            fi
         fi
 
         # Install systemd service for this user (if not using global service dir)
@@ -306,12 +366,56 @@ set_system_defaults() {
     sudo kwriteconfig6 --file "$xdg_globals" --group KDE --key DefaultDarkLookAndFeel "${LAF_DARK:-}"
     sudo kwriteconfig6 --file "$xdg_globals" --group KDE --key AutomaticLookAndFeel true
 
-    # Copy config file and panel layout to /etc/skel so new users get them
+    # Copy gloam config to /etc/skel so new users get it
     sudo mkdir -p /etc/skel/.config
     sudo cp "$CONFIG_FILE" /etc/skel/.config/gloam.conf
-    local panel_config="${HOME}/.config/plasma-org.kde.plasma.desktop-appletsrc"
-    if [[ -f "$panel_config" ]]; then
-        sudo cp "$panel_config" /etc/skel/.config/plasma-org.kde.plasma.desktop-appletsrc
+
+    # Copy desktop settings if requested
+    if [[ "${COPY_DESKTOP_LAYOUT:-}" == true ]]; then
+        # Panel applet layout (with wallpaper path rewrite)
+        local panel_config="${HOME}/.config/plasma-org.kde.plasma.desktop-appletsrc"
+        if [[ -f "$panel_config" ]]; then
+            sudo cp "$panel_config" /etc/skel/.config/plasma-org.kde.plasma.desktop-appletsrc
+            sudo sed -i 's|Image=file://.*/wallpapers/gloam-|Image=file:///usr/share/wallpapers/gloam-|g' \
+                /etc/skel/.config/plasma-org.kde.plasma.desktop-appletsrc
+        fi
+
+        # UX config files (panels, input, window manager, shortcuts, apps)
+        local ux_configs=(
+            plasmashellrc
+            kcminputrc
+            kwinrc
+            kglobalshortcutsrc
+            kscreenlockerrc
+            krunnerrc
+            dolphinrc
+            konsolerc
+            breezerc
+        )
+        for cfg in "${ux_configs[@]}"; do
+            [[ -f "${HOME}/.config/${cfg}" ]] || continue
+            sudo cp "${HOME}/.config/${cfg}" "/etc/skel/.config/${cfg}"
+        done
+
+        # Rewrite gloam wallpaper paths in lock screen config
+        if [[ -f /etc/skel/.config/kscreenlockerrc ]]; then
+            sudo sed -i 's|Image=file://.*/wallpapers/gloam-|Image=file:///usr/share/wallpapers/gloam-|g' \
+                /etc/skel/.config/kscreenlockerrc
+        fi
+
+        # Set lockscreen wallpaper if not already a gloam wallpaper
+        if [[ "${WALLPAPER:-}" == true ]] && ! grep -q 'wallpapers/gloam-' /etc/skel/.config/kscreenlockerrc 2>/dev/null; then
+            sudo kwriteconfig6 --file /etc/skel/.config/kscreenlockerrc \
+                --group Greeter --group Wallpaper --group org.kde.image --group General \
+                --key Image "file:///usr/share/wallpapers/gloam-dynamic"
+        fi
+
+        # Custom plasmoids so panel widgets work
+        local plasmoids_dir="${HOME}/.local/share/plasma/plasmoids"
+        if [[ -d "$plasmoids_dir" ]] && [[ -n "$(ls -A "$plasmoids_dir" 2>/dev/null)" ]]; then
+            sudo mkdir -p /etc/skel/.local/share/plasma/plasmoids
+            sudo cp -r "$plasmoids_dir"/* /etc/skel/.local/share/plasma/plasmoids/
+        fi
     fi
 
     # Auto-enable service for all users via default.target.wants symlink
@@ -560,15 +664,16 @@ generate_wallpaper_pack() {
     local -n _light_imgs=$3
     local -n _dark_imgs=$4
     local wallpaper_dir
+    local _global="${THEME_INSTALL_GLOBAL:-${INSTALL_GLOBAL:-false}}"
 
-    if [[ "${THEME_INSTALL_GLOBAL:-false}" == true ]]; then
+    if [[ "$_global" == true ]]; then
         wallpaper_dir="/usr/share/wallpapers/${pack_name}"
     else
         wallpaper_dir="${HOME}/.local/share/wallpapers/${pack_name}"
     fi
 
     # Clean and create directory structure
-    if [[ "${THEME_INSTALL_GLOBAL:-false}" == true ]]; then
+    if [[ "$_global" == true ]]; then
         sudo rm -rf "$wallpaper_dir"
         sudo mkdir -p "${wallpaper_dir}/contents/images"
     else
@@ -583,7 +688,7 @@ generate_wallpaper_pack() {
         dims=$(get_image_dimensions "$img")
         [[ -z "$dims" ]] && continue
         ext="${img##*.}"
-        if [[ "${THEME_INSTALL_GLOBAL:-false}" == true ]]; then
+        if [[ "$_global" == true ]]; then
             sudo cp "$img" "${wallpaper_dir}/contents/images/${dims}.${ext,,}"
         else
             cp "$img" "${wallpaper_dir}/contents/images/${dims}.${ext,,}"
@@ -592,7 +697,7 @@ generate_wallpaper_pack() {
 
     # Copy dark images (if any)
     if [[ ${#_dark_imgs[@]} -gt 0 ]]; then
-        if [[ "${THEME_INSTALL_GLOBAL:-false}" == true ]]; then
+        if [[ "$_global" == true ]]; then
             sudo mkdir -p "${wallpaper_dir}/contents/images_dark"
         else
             mkdir -p "${wallpaper_dir}/contents/images_dark"
@@ -603,7 +708,7 @@ generate_wallpaper_pack() {
             dims=$(get_image_dimensions "$img")
             [[ -z "$dims" ]] && continue
             ext="${img##*.}"
-            if [[ "${THEME_INSTALL_GLOBAL:-false}" == true ]]; then
+            if [[ "$_global" == true ]]; then
                 sudo cp "$img" "${wallpaper_dir}/contents/images_dark/${dims}.${ext,,}"
             else
                 cp "$img" "${wallpaper_dir}/contents/images_dark/${dims}.${ext,,}"
@@ -612,7 +717,7 @@ generate_wallpaper_pack() {
     fi
 
     # Generate metadata.json
-    if [[ "${THEME_INSTALL_GLOBAL:-false}" == true ]]; then
+    if [[ "$_global" == true ]]; then
         sudo tee "${wallpaper_dir}/metadata.json" > /dev/null <<METADATA
 {
     "KPlugin": {
@@ -1518,17 +1623,20 @@ bundle_wallpapers_and_sddm() {
 
     # Bundle wallpaper packs into light theme dir (canonical location)
     if [[ "${WALLPAPER:-}" == true ]]; then
-        local wp_src
-        if [[ "${THEME_INSTALL_GLOBAL:-false}" == true ]]; then
-            wp_src="/usr/share/wallpapers"
-        else
-            wp_src="${HOME}/.local/share/wallpapers"
-        fi
+        # Check both global and local dirs — wallpapers may have been generated
+        # locally before the global install decision was made
+        local wp_src=""
+        for candidate in "/usr/share/wallpapers" "${HOME}/.local/share/wallpapers"; do
+            for pack in gloam-dynamic gloam-light gloam-dark; do
+                if [[ -d "${candidate}/${pack}" ]]; then
+                    wp_src="$candidate"
+                    break 2
+                fi
+            done
+        done
 
         local has_packs=false
-        for pack in gloam-dynamic gloam-light gloam-dark; do
-            [[ -d "${wp_src}/${pack}" ]] && has_packs=true && break
-        done
+        [[ -n "$wp_src" ]] && has_packs=true
 
         if [[ "$has_packs" == true ]]; then
             if [[ "$THEME_INSTALL_GLOBAL" == true ]]; then
@@ -2500,7 +2608,7 @@ do_configure() {
 
             echo ""
             local wallpaper_dir
-            if [[ "${THEME_INSTALL_GLOBAL:-false}" == true ]]; then
+            if [[ "${THEME_INSTALL_GLOBAL:-${INSTALL_GLOBAL:-false}}" == true ]]; then
                 wallpaper_dir="/usr/share/wallpapers/gloam-dynamic"
             else
                 wallpaper_dir="${HOME}/.local/share/wallpapers/gloam-dynamic"
@@ -3146,6 +3254,22 @@ do_remove() {
 
     # Remove system defaults for new users
     [[ -f "$skel_config" ]] && sudo rm "$skel_config" && echo "Removed $skel_config" || true
+    local skel_ux_files=(
+        plasma-org.kde.plasma.desktop-appletsrc
+        plasmashellrc
+        kcminputrc
+        kwinrc
+        kglobalshortcutsrc
+        kscreenlockerrc
+        krunnerrc
+        dolphinrc
+        konsolerc
+        breezerc
+    )
+    for cfg in "${skel_ux_files[@]}"; do
+        [[ -f "/etc/skel/.config/${cfg}" ]] && sudo rm "/etc/skel/.config/${cfg}" && echo "Removed /etc/skel/.config/${cfg}" || true
+    done
+    [[ -d /etc/skel/.local/share/plasma/plasmoids ]] && sudo rm -rf /etc/skel/.local/share/plasma/plasmoids && echo "Removed /etc/skel/.local/share/plasma/plasmoids" || true
 
     # Remove keyboard shortcut from /etc/xdg/kglobalshortcutsrc
     if [[ -f "$xdg_shortcuts" ]] && grep -q "$SHORTCUT_ID" "$xdg_shortcuts" 2>/dev/null; then
