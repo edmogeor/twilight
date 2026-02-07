@@ -2103,16 +2103,6 @@ do_configure() {
     check_desktop_environment
     check_dependencies
 
-    # Show disclaimer
-    echo ""
-    echo -e "${YELLOW}${BOLD}Disclaimer${RESET}"
-    echo "gloam modifies Plasma theme settings, system configs, and user files."
-    echo "It is recommended to back up your system before proceeding."
-    echo "The authors are not responsible for any system issues."
-    echo ""
-    read -rp "Continue? [y/N]: " disclaimer_choice
-    [[ ! "$disclaimer_choice" =~ ^[Yy]$ ]] && { echo "Aborted."; exit 0; }
-
     # Parse modifiers first to know if this is a full or partial configure
     shift # Remove 'configure' from args
     local configure_all=true
@@ -2150,19 +2140,170 @@ do_configure() {
             -C|--cursors)       configure_cursors=true; configure_all=false ;;
             -w|--widget)        configure_widget=true; configure_all=false ;;
             -K|--shortcut)      configure_shortcut=true; configure_all=false ;;
-            --import)           shift; IMPORT_CONFIG="$1" ;;
+            -I|--import)        shift; IMPORT_CONFIG="$1" ;;
             help|-h|--help)     show_configure_help; exit 0 ;;
             *)
                 echo "Unknown option: $1" >&2
-                echo "Options: -c|--colors -k|--kvantum -a|--appstyle -g|--gtk -p|--style -d|--decorations -i|--icons -C|--cursors -S|--splash -l|--login -W|--wallpaper -o|--konsole -s|--script -w|--widget -K|--shortcut --import <file>" >&2
+                echo "Options: -c|--colors -k|--kvantum -a|--appstyle -g|--gtk -p|--style -d|--decorations -i|--icons -C|--cursors -S|--splash -l|--login -W|--wallpaper -o|--konsole -s|--script -w|--widget -K|--shortcut -I|--import <file>" >&2
                 exit 1
                 ;;
         esac
         shift
     done
 
+    # Show disclaimer
+    echo ""
+    echo -e "${YELLOW}${BOLD}Disclaimer${RESET}"
+    echo "gloam modifies Plasma theme settings, system configs, and user files."
+    echo "It is recommended to back up your system before proceeding."
+    echo "The authors are not responsible for any system issues."
+    echo ""
+    read -rp "Continue? [y/N]: " disclaimer_choice
+    [[ ! "$disclaimer_choice" =~ ^[Yy]$ ]] && { echo "Aborted."; exit 0; }
+
+    # Handle config import - source the file and skip all interactive questions
+    if [[ -n "${IMPORT_CONFIG}" ]]; then
+        if [[ ! -f "$IMPORT_CONFIG" ]]; then
+            echo -e "${RED}Error: Config file not found: $IMPORT_CONFIG${RESET}"
+            exit 1
+        fi
+        echo -e "${BLUE}Importing configuration from ${IMPORT_CONFIG}...${RESET}"
+        # shellcheck source=/dev/null
+        source "$IMPORT_CONFIG"
+
+        # Validate that all referenced assets exist before making any changes
+        local import_errors=()
+
+        # Base themes (required for custom theme generation)
+        if [[ -n "${BASE_THEME_LIGHT:-}" ]]; then
+            local _found=false
+            for dir in /usr/share/plasma/look-and-feel "${HOME}/.local/share/plasma/look-and-feel"; do
+                [[ -d "${dir}/${BASE_THEME_LIGHT}" ]] && _found=true && break
+            done
+            [[ "$_found" == false ]] && import_errors+=("Light base theme not installed: $BASE_THEME_LIGHT")
+        fi
+        if [[ -n "${BASE_THEME_DARK:-}" ]]; then
+            local _found=false
+            for dir in /usr/share/plasma/look-and-feel "${HOME}/.local/share/plasma/look-and-feel"; do
+                [[ -d "${dir}/${BASE_THEME_DARK}" ]] && _found=true && break
+            done
+            [[ "$_found" == false ]] && import_errors+=("Dark base theme not installed: $BASE_THEME_DARK")
+        fi
+
+        # Icon themes
+        for _label_icon in "ICON_LIGHT:Light icon theme" "ICON_DARK:Dark icon theme"; do
+            local _var="${_label_icon%%:*}" _desc="${_label_icon#*:}"
+            local _val="${!_var:-}"
+            if [[ -n "$_val" ]]; then
+                local _found=false
+                for dir in /usr/share/icons "${HOME}/.local/share/icons" "${HOME}/.icons"; do
+                    [[ -d "${dir}/${_val}" ]] && _found=true && break
+                done
+                [[ "$_found" == false ]] && import_errors+=("${_desc} not installed: $_val")
+            fi
+        done
+
+        # Cursor themes
+        for _label_cur in "CURSOR_LIGHT:Light cursor theme" "CURSOR_DARK:Dark cursor theme"; do
+            local _var="${_label_cur%%:*}" _desc="${_label_cur#*:}"
+            local _val="${!_var:-}"
+            if [[ -n "$_val" ]]; then
+                local _found=false
+                for dir in /usr/share/icons "${HOME}/.local/share/icons" "${HOME}/.icons"; do
+                    [[ -d "${dir}/${_val}" ]] && _found=true && break
+                done
+                [[ "$_found" == false ]] && import_errors+=("${_desc} not installed: $_val")
+            fi
+        done
+
+        # Kvantum themes
+        for _label_kv in "KVANTUM_LIGHT:Light Kvantum theme" "KVANTUM_DARK:Dark Kvantum theme"; do
+            local _var="${_label_kv%%:*}" _desc="${_label_kv#*:}"
+            local _val="${!_var:-}"
+            if [[ -n "$_val" ]]; then
+                local _found=false
+                for dir in /usr/share/Kvantum "${HOME}/.config/Kvantum"; do
+                    [[ -d "${dir}/${_val}" ]] && _found=true && break
+                done
+                [[ "$_found" == false ]] && import_errors+=("${_desc} not installed: $_val")
+            fi
+        done
+
+        # GTK themes
+        for _label_gtk in "GTK_LIGHT:Light GTK theme" "GTK_DARK:Dark GTK theme"; do
+            local _var="${_label_gtk%%:*}" _desc="${_label_gtk#*:}"
+            local _val="${!_var:-}"
+            if [[ -n "$_val" ]]; then
+                local _found=false
+                for dir in /usr/share/themes "${HOME}/.themes" "${HOME}/.local/share/themes"; do
+                    [[ -d "${dir}/${_val}" ]] && _found=true && break
+                done
+                [[ "$_found" == false ]] && import_errors+=("${_desc} not installed: $_val")
+            fi
+        done
+
+        # Wallpaper source images
+        if [[ "${WALLPAPER:-}" == true ]]; then
+            if [[ -z "${WP_SOURCE_LIGHT:-}" ]]; then
+                import_errors+=("WALLPAPER=true but WP_SOURCE_LIGHT is not set")
+            else
+                for img in ${WP_SOURCE_LIGHT}; do
+                    [[ -f "$img" ]] || import_errors+=("Light wallpaper not found: $img")
+                done
+            fi
+            if [[ -z "${WP_SOURCE_DARK:-}" ]]; then
+                import_errors+=("WALLPAPER=true but WP_SOURCE_DARK is not set")
+            else
+                for img in ${WP_SOURCE_DARK}; do
+                    [[ -f "$img" ]] || import_errors+=("Dark wallpaper not found: $img")
+                done
+            fi
+        fi
+
+        # Custom scripts
+        [[ -n "${SCRIPT_LIGHT:-}" && ! -f "${SCRIPT_LIGHT}" ]] && import_errors+=("Light script not found: $SCRIPT_LIGHT")
+        [[ -n "${SCRIPT_DARK:-}" && ! -f "${SCRIPT_DARK}" ]] && import_errors+=("Dark script not found: $SCRIPT_DARK")
+
+        if [[ ${#import_errors[@]} -gt 0 ]]; then
+            echo -e "${RED}Import failed — missing assets:${RESET}"
+            for err in "${import_errors[@]}"; do
+                echo -e "  ${RED}- ${err}${RESET}"
+            done
+            exit 1
+        fi
+
+        # Authenticate sudo if config requires global installation
+        if [[ "${INSTALL_GLOBAL:-false}" == true ]]; then
+            echo "Config requires global installation, requesting sudo..."
+            sudo -v || { echo -e "${RED}Sudo required for global installation.${RESET}"; exit 1; }
+        fi
+        # Auto-discover push targets if push was enabled
+        if [[ "${PUSH_TO_USERS:-false}" == true ]]; then
+            SELECTED_USERS=()
+            while IFS=: read -r username _ uid _ _ home _; do
+                [[ "$uid" -ge 1000 && "$uid" -lt 60000 && "$home" == /home/* && -d "$home" && "$username" != "$USER" ]] && SELECTED_USERS+=("$username:$home")
+            done < /etc/passwd
+        fi
+        # Resolve LAF to base themes (custom themes won't exist on a fresh machine)
+        local laf_light laf_dark
+        if [[ -n "${BASE_THEME_LIGHT:-}" && -n "${BASE_THEME_DARK:-}" ]]; then
+            laf_light="$BASE_THEME_LIGHT"
+            laf_dark="$BASE_THEME_DARK"
+        else
+            laf_light="${LAF_LIGHT:-}"
+            laf_dark="${LAF_DARK:-}"
+        fi
+        if [[ -z "$laf_light" || -z "$laf_dark" ]]; then
+            echo -e "${RED}Error: Imported config is missing theme definitions.${RESET}"
+            exit 1
+        fi
+        echo -e "  ☀️ Light theme: ${BOLD}$(get_friendly_name laf "$laf_light")${RESET}"
+        echo -e "  🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark")${RESET}"
+        cleanup_stale
+        # Remove app-specific overrides so they follow the global theme
+        clean_app_overrides
     # Load existing config if modifying specific options (includes INSTALL_GLOBAL)
-    if [[ "$configure_all" == false && -f "$CONFIG_FILE" ]]; then
+    elif [[ "$configure_all" == false && -f "$CONFIG_FILE" ]]; then
         # shellcheck source=/dev/null
         source "$CONFIG_FILE"
         # Authenticate sudo if this is a global installation
@@ -2187,35 +2328,6 @@ do_configure() {
         else
             cleanup_stale
         fi
-    fi
-
-    # Handle config import - source the file and skip all interactive questions
-    if [[ -n "${IMPORT_CONFIG}" ]]; then
-        if [[ ! -f "$IMPORT_CONFIG" ]]; then
-            echo -e "${RED}Error: Config file not found: $IMPORT_CONFIG${RESET}"
-            exit 1
-        fi
-        echo -e "${BLUE}Importing configuration from ${IMPORT_CONFIG}...${RESET}"
-        # shellcheck source=/dev/null
-        source "$IMPORT_CONFIG"
-        # Authenticate sudo if config requires global installation
-        if [[ "${INSTALL_GLOBAL:-false}" == true ]]; then
-            echo "Config requires global installation, requesting sudo..."
-            sudo -v || { echo -e "${RED}Sudo required for global installation.${RESET}"; exit 1; }
-        fi
-        # Set LAF variables for post-config steps
-        local laf_light laf_dark
-        laf_light="${LAF_LIGHT:-}"
-        laf_dark="${LAF_DARK:-}"
-        if [[ -z "$laf_light" || -z "$laf_dark" ]]; then
-            echo -e "${RED}Error: Imported config is missing LAF_LIGHT or LAF_DARK.${RESET}"
-            exit 1
-        fi
-        echo -e "  ☀️ Light theme: ${BOLD}$(get_friendly_name laf "$laf_light")${RESET}"
-        echo -e "  🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark")${RESET}"
-
-        # Remove app-specific overrides so they follow the global theme
-        clean_app_overrides
     fi
 
     if [[ -z "${IMPORT_CONFIG}" ]]; then
@@ -2758,6 +2870,10 @@ do_configure() {
         fi
 
         if [[ ${#wp_light_paths[@]} -gt 0 && ${#wp_dark_paths[@]} -gt 0 ]]; then
+            # Store original source paths for import/re-generation
+            WP_SOURCE_LIGHT="${wp_light_paths[*]}"
+            WP_SOURCE_DARK="${wp_dark_paths[*]}"
+
             echo ""
             echo "Creating wallpaper packs..."
             local wp_empty=()
@@ -3095,6 +3211,83 @@ do_configure() {
 
     fi # end of interactive block (skipped during --import)
 
+    # Import: generate custom themes and apply settings
+    if [[ -n "${IMPORT_CONFIG}" && -n "${BASE_THEME_LIGHT:-}" && -n "${BASE_THEME_DARK:-}" ]]; then
+        echo ""
+        echo "Generating custom themes..."
+
+        if [[ "${THEME_INSTALL_GLOBAL:-false}" == true ]]; then
+            THEME_INSTALL_DIR="/usr/share/plasma/look-and-feel"
+        else
+            THEME_INSTALL_DIR="${HOME}/.local/share/plasma/look-and-feel"
+        fi
+
+        CUSTOM_THEME_LIGHT="org.kde.custom.light"
+        CUSTOM_THEME_DARK="org.kde.custom.dark"
+
+        generate_custom_theme "light" "$BASE_THEME_LIGHT"
+        generate_custom_theme "dark" "$BASE_THEME_DARK"
+
+        # Regenerate wallpaper packs from original source images
+        if [[ "${WALLPAPER:-}" == true && -n "${WP_SOURCE_LIGHT:-}" && -n "${WP_SOURCE_DARK:-}" ]]; then
+            echo "Creating wallpaper packs..."
+            local wp_light_paths=() wp_dark_paths=()
+            local img
+            for img in ${WP_SOURCE_LIGHT}; do
+                [[ -f "$img" ]] && wp_light_paths+=("$img")
+            done
+            for img in ${WP_SOURCE_DARK}; do
+                [[ -f "$img" ]] && wp_dark_paths+=("$img")
+            done
+            if [[ ${#wp_light_paths[@]} -gt 0 && ${#wp_dark_paths[@]} -gt 0 ]]; then
+                local wp_empty=()
+                generate_wallpaper_pack "gloam-dynamic" "Custom (Dynamic)" wp_light_paths wp_dark_paths
+                generate_wallpaper_pack "gloam-light" "Custom (Light)" wp_light_paths wp_empty
+                generate_wallpaper_pack "gloam-dark" "Custom (Dark)" wp_dark_paths wp_empty
+            fi
+        fi
+
+        bundle_wallpapers_and_sddm
+
+        laf_light="$CUSTOM_THEME_LIGHT"
+        laf_dark="$CUSTOM_THEME_DARK"
+
+        # Update KDE Quick Settings to use our custom themes
+        kwriteconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel "$CUSTOM_THEME_LIGHT"
+        kwriteconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel "$CUSTOM_THEME_DARK"
+
+        # Apply the appropriate custom theme
+        local current_laf
+        current_laf=$(kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage 2>/dev/null)
+        LAF_LIGHT="$laf_light"
+        LAF_DARK="$laf_dark"
+        if [[ "$current_laf" == "$CUSTOM_THEME_DARK" || "$current_laf" == "$BASE_THEME_DARK" ]]; then
+            plasma-apply-lookandfeel -a "$LAF_DARK"
+        else
+            plasma-apply-lookandfeel -a "$LAF_LIGHT"
+        fi
+
+        # Apply wallpapers from bundled location
+        if [[ "${WALLPAPER:-}" == true && -n "${WALLPAPER_BASE:-}" ]]; then
+            local wp_mode="gloam-dynamic"
+            apply_desktop_wallpaper "${WALLPAPER_BASE}/${wp_mode}"
+            apply_lockscreen_wallpaper "${WALLPAPER_BASE}/${wp_mode}"
+        fi
+
+        # Apply SDDM wallpaper
+        if [[ -x /usr/local/lib/gloam/set-sddm-background ]]; then
+            local import_sddm_variant="light"
+            if [[ "$current_laf" == "$CUSTOM_THEME_DARK" || "$current_laf" == "$BASE_THEME_DARK" ]]; then
+                import_sddm_variant="dark"
+            fi
+            local import_sddm_bg
+            import_sddm_bg=$({ compgen -G "/usr/local/lib/gloam/sddm-bg-${import_sddm_variant}.*" || true; } | head -1)
+            [[ -n "$import_sddm_bg" ]] && apply_sddm_wallpaper "$import_sddm_bg"
+        fi
+
+        echo -e "${GREEN}Custom themes installed.${RESET}"
+    fi
+
     # Store LAF values for push_config_to_users and set_system_defaults
     LAF_LIGHT="$laf_light"
     LAF_DARK="$laf_dark"
@@ -3126,6 +3319,8 @@ SDDM_DARK=${SDDM_DARK:-}
 APPSTYLE_LIGHT=${APPSTYLE_LIGHT:-}
 APPSTYLE_DARK=${APPSTYLE_DARK:-}
 WALLPAPER=${WALLPAPER:-}
+WP_SOURCE_LIGHT=${WP_SOURCE_LIGHT:-}
+WP_SOURCE_DARK=${WP_SOURCE_DARK:-}
 SCRIPT_LIGHT=${SCRIPT_LIGHT:-}
 SCRIPT_DARK=${SCRIPT_DARK:-}
 CUSTOM_THEME_LIGHT=${CUSTOM_THEME_LIGHT:-}
@@ -3139,6 +3334,12 @@ ICON_DARK_MOVED_FROM=${ICON_DARK_MOVED_FROM:-}
 CURSOR_LIGHT_MOVED_FROM=${CURSOR_LIGHT_MOVED_FROM:-}
 CURSOR_DARK_MOVED_FROM=${CURSOR_DARK_MOVED_FROM:-}
 INSTALL_GLOBAL=${INSTALL_GLOBAL:-false}
+PUSH_TO_USERS=${PUSH_TO_USERS:-false}
+SET_SYSTEM_DEFAULTS=${SET_SYSTEM_DEFAULTS:-false}
+COPY_DESKTOP_LAYOUT=${COPY_DESKTOP_LAYOUT:-false}
+INSTALL_CLI=${INSTALL_CLI:-false}
+INSTALL_WIDGET=${INSTALL_WIDGET:-false}
+INSTALL_SHORTCUT=${INSTALL_SHORTCUT:-false}
 EOF
 
     # Get paths based on install mode
@@ -3184,6 +3385,25 @@ EOF
             chmod +x "$cli_path"
         fi
         executable_path="$cli_path"
+    elif [[ -n "${IMPORT_CONFIG}" ]]; then
+        # Import mode - install based on config flags
+        if [[ "${INSTALL_CLI:-false}" == true ]]; then
+            if [[ "$INSTALL_GLOBAL" == true ]]; then
+                sudo mkdir -p "$(dirname "$cli_path")"
+                [[ "$(realpath "$0")" != "$(realpath "$cli_path" 2>/dev/null)" ]] && sudo cp "$0" "$cli_path"
+                sudo chmod +x "$cli_path"
+            else
+                mkdir -p "$(dirname "$cli_path")"
+                [[ "$(realpath "$0")" != "$(realpath "$cli_path" 2>/dev/null)" ]] && cp "$0" "$cli_path"
+                chmod +x "$cli_path"
+            fi
+            executable_path="$cli_path"
+            echo -e "${GREEN}Installed to $cli_path${RESET}"
+            [[ "${INSTALL_WIDGET:-false}" == true ]] && install_plasmoid
+            [[ "${INSTALL_SHORTCUT:-false}" == true ]] && install_shortcut
+        else
+            executable_path=$(readlink -f "$0")
+        fi
     elif [[ "$configure_all" == true ]]; then
         # Install the CLI
         local install_cli_prompt
@@ -3196,6 +3416,7 @@ EOF
         echo ""
         read -rp "$install_cli_prompt [y/N]: " choice
         if [[ "$choice" =~ ^[Yy]$ ]]; then
+            INSTALL_CLI=true
             if [[ "$INSTALL_GLOBAL" == true ]]; then
                 sudo mkdir -p "$(dirname "$cli_path")"
                 [[ "$(realpath "$0")" != "$(realpath "$cli_path" 2>/dev/null)" ]] && sudo cp "$0" "$cli_path"
@@ -3211,12 +3432,12 @@ EOF
             # Offer to install the panel widget
             echo ""
             read -rp "Install the Light/Dark Mode Toggle panel widget? [y/N]: " choice
-            [[ "$choice" =~ ^[Yy]$ ]] && install_plasmoid
+            [[ "$choice" =~ ^[Yy]$ ]] && { INSTALL_WIDGET=true; install_plasmoid; }
 
             # Offer to install keyboard shortcut
             echo ""
             read -rp "Add a keyboard shortcut (Meta+Shift+L) to toggle themes? [y/N]: " choice
-            [[ "$choice" =~ ^[Yy]$ ]] && install_shortcut
+            [[ "$choice" =~ ^[Yy]$ ]] && { INSTALL_SHORTCUT=true; install_shortcut; }
         else
             # Use absolute path of current script
             executable_path=$(readlink -f "$0")
@@ -3727,7 +3948,7 @@ Options:
   -s, --script        Configure custom scripts only
   -w, --widget        Install/reinstall panel widget
   -K, --shortcut      Install/reinstall keyboard shortcut (Meta+Shift+L)
-      --import <file>  Import an existing gloam.conf and skip interactive setup
+  -I, --import <file>  Import an existing gloam.conf and skip interactive setup
 
 Panel Widget:
   During configuration, if you install the command globally (~/.local/bin),

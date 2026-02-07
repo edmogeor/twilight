@@ -135,6 +135,7 @@ Once configured, the service runs in the background. You usually don't need to t
 | Command | Description |
 | :--- | :--- |
 | `gloam configure` | Run the setup wizard. |
+| `gloam configure -I <file>` | Import an existing `gloam.conf` and skip interactive setup. |
 | `gloam status` | Show the service status and current theme configuration. |
 | `gloam light` | Switch to light mode (and sync all sub-themes). |
 | `gloam dark` | Switch to dark mode (and sync all sub-themes). |
