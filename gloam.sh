@@ -1859,7 +1859,11 @@ remove_wallpaper_packs() {
 apply_theme() {
     local laf="$1"
     local initial="${2:-false}"  # true on startup, skips browser signal to avoid feedback loop
-    log "Applying theme: $laf (initial=$initial)"
+    if [[ "$initial" == true ]]; then
+        log "Applying theme: $laf (initial)"
+    else
+        log "Applying theme: $laf"
+    fi
     # Wait for LookAndFeel to finish applying before overriding settings
     sleep 0.5
 
@@ -1910,12 +1914,12 @@ apply_theme() {
             local wp_base="${WALLPAPER_BASE:-${HOME}/.local/share/wallpapers}"
             is_gloam_wallpaper desktop && apply_desktop_wallpaper "${wp_base}/gloam-dark"
             is_gloam_wallpaper lockscreen && apply_lockscreen_wallpaper "${wp_base}/gloam-dark"
-            # SDDM - always explicit (not handled by custom theme defaults)
-            if is_gloam_wallpaper sddm; then
-                local sddm_bg_dark
-                sddm_bg_dark=$({ compgen -G "/usr/local/lib/gloam/sddm-bg-dark.*" || true; } | head -1)
-                [[ -n "$sddm_bg_dark" ]] && apply_sddm_wallpaper "$sddm_bg_dark"
-            fi
+            # SDDM background - check if gloam images exist on disk (user opted in during configure)
+            # Note: can't use is_gloam_wallpaper sddm here because the LookAndFeel's defaults
+            # may have switched the SDDM theme, and the new theme won't have a gloam background yet
+            local sddm_bg_dark
+            sddm_bg_dark=$({ compgen -G "/usr/local/lib/gloam/sddm-bg-dark.*" || true; } | head -1)
+            [[ -n "$sddm_bg_dark" ]] && apply_sddm_wallpaper "$sddm_bg_dark"
         fi
 
         # Browser color scheme - skip on initial startup to avoid feedback loop
@@ -1981,12 +1985,12 @@ apply_theme() {
             local wp_base="${WALLPAPER_BASE:-${HOME}/.local/share/wallpapers}"
             is_gloam_wallpaper desktop && apply_desktop_wallpaper "${wp_base}/gloam-light"
             is_gloam_wallpaper lockscreen && apply_lockscreen_wallpaper "${wp_base}/gloam-light"
-            # SDDM - always explicit (not handled by custom theme defaults)
-            if is_gloam_wallpaper sddm; then
-                local sddm_bg_light
-                sddm_bg_light=$({ compgen -G "/usr/local/lib/gloam/sddm-bg-light.*" || true; } | head -1)
-                [[ -n "$sddm_bg_light" ]] && apply_sddm_wallpaper "$sddm_bg_light"
-            fi
+            # SDDM background - check if gloam images exist on disk (user opted in during configure)
+            # Note: can't use is_gloam_wallpaper sddm here because the LookAndFeel's defaults
+            # may have switched the SDDM theme, and the new theme won't have a gloam background yet
+            local sddm_bg_light
+            sddm_bg_light=$({ compgen -G "/usr/local/lib/gloam/sddm-bg-light.*" || true; } | head -1)
+            [[ -n "$sddm_bg_light" ]] && apply_sddm_wallpaper "$sddm_bg_light"
         fi
 
         # Browser color scheme - skip on initial startup to avoid feedback loop
@@ -2027,7 +2031,7 @@ do_watch() {
     log "Watcher started"
 
     # Wait for Plasma to fully initialize before applying theme
-    sleep 0.5
+    sleep 1
 
     PREV_LAF=$(get_laf)
     log "Initial theme: $PREV_LAF"
@@ -2077,10 +2081,7 @@ do_light() {
         kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
     fi
 
-    # If watcher is not running, manually sync sub-themes
-    if ! systemctl --user is-active --quiet "$SERVICE_NAME"; then
-         apply_theme "$LAF_LIGHT"
-    fi
+    apply_theme "$LAF_LIGHT"
 }
 
 do_dark() {
@@ -2099,10 +2100,7 @@ do_dark() {
         kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
     fi
 
-    # If watcher is not running, manually sync sub-themes
-    if ! systemctl --user is-active --quiet "$SERVICE_NAME"; then
-         apply_theme "$LAF_DARK"
-    fi
+    apply_theme "$LAF_DARK"
 }
 
 do_toggle() {
@@ -3279,6 +3277,29 @@ do_configure() {
         fi
 
         bundle_wallpapers_and_sddm
+
+        # Set up SDDM sudoers rules (skipped during import since interactive prompts are bypassed)
+        if [[ -n "${SDDM_LIGHT:-}" || -n "${SDDM_DARK:-}" ]]; then
+            setup_sddm_sudoers
+        fi
+
+        # Set up SDDM wallpaper helper script if backgrounds were bundled
+        if [[ -n "$({ compgen -G '/usr/local/lib/gloam/sddm-bg-*' 2>/dev/null || true; })" ]]; then
+            sudo mkdir -p /usr/local/lib/gloam
+            sudo tee /usr/local/lib/gloam/set-sddm-background > /dev/null <<'SCRIPT'
+#!/bin/bash
+[[ -z "$1" || ! -f "$1" ]] && exit 1
+THEME=$(kreadconfig6 --file /etc/sddm.conf.d/kde_settings.conf --group Theme --key Current 2>/dev/null)
+[[ -z "$THEME" ]] && THEME="breeze"
+THEME_DIR="/usr/share/sddm/themes/$THEME"
+[[ -d "$THEME_DIR" ]] || exit 1
+kwriteconfig6 --file "$THEME_DIR/theme.conf.user" --group General --key background "$1"
+SCRIPT
+            sudo chmod 755 /usr/local/lib/gloam/set-sddm-background
+            echo "ALL ALL=(ALL) NOPASSWD: /usr/local/lib/gloam/set-sddm-background" | \
+                sudo tee /etc/sudoers.d/gloam-sddm-bg > /dev/null
+            sudo chmod 440 /etc/sudoers.d/gloam-sddm-bg
+        fi
 
         laf_light="$CUSTOM_THEME_LIGHT"
         laf_dark="$CUSTOM_THEME_DARK"
