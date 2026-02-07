@@ -334,6 +334,16 @@ push_config_to_users() {
             fi
         fi
 
+        # Apply wallpapers to user even without full desktop layout copy
+        if [[ "${WALLPAPER:-}" == true && "${COPY_DESKTOP_LAYOUT:-}" != true ]]; then
+            # Set lockscreen wallpaper
+            if ! sudo grep -q 'wallpapers/gloam-' "${homedir}/.config/kscreenlockerrc" 2>/dev/null; then
+                sudo -u "$username" kwriteconfig6 --file "${homedir}/.config/kscreenlockerrc" \
+                    --group Greeter --group Wallpaper --group org.kde.image --group General \
+                    --key Image "file:///usr/share/wallpapers/gloam-dynamic" 2>/dev/null || true
+            fi
+        fi
+
         # Install systemd service for this user (if not using global service dir)
         if [[ "$INSTALL_GLOBAL" != true ]]; then
             sudo mkdir -p "$target_service_dir"
@@ -378,6 +388,14 @@ push_config_to_users() {
         done
     fi
 
+    # Set system-wide default desktop wallpaper via Plasma plugin config
+    if [[ "${WALLPAPER:-}" == true && -d "/usr/share/wallpapers/gloam-dynamic" ]]; then
+        local wp_main_xml="/usr/share/plasma/wallpapers/org.kde.image/contents/config/main.xml"
+        if [[ -f "$wp_main_xml" ]]; then
+            sudo sed -i '/<entry name="Image"/,/<\/entry>/ s|<default>[^<]*</default>|<default>file:///usr/share/wallpapers/gloam-dynamic</default>|' "$wp_main_xml" 2>/dev/null || true
+        fi
+    fi
+
     # Fallback: install icon/cursor themes directly from local dirs (no custom theme)
     install_icons_system_wide
 
@@ -391,6 +409,19 @@ push_config_to_users() {
             sudo cp "$sddm_src" "/usr/local/lib/gloam/"
         fi
     done
+
+    # Apply SDDM wallpaper for current mode after restoring files
+    if [[ -x /usr/local/lib/gloam/set-sddm-background ]]; then
+        local current_laf_push
+        current_laf_push=$(kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage 2>/dev/null)
+        local push_sddm_variant="light"
+        if [[ "$current_laf_push" == "${LAF_DARK:-}" ]]; then
+            push_sddm_variant="dark"
+        fi
+        local push_sddm_bg
+        push_sddm_bg=$({ compgen -G "/usr/local/lib/gloam/sddm-bg-${push_sddm_variant}.*" || true; } | head -1)
+        [[ -n "$push_sddm_bg" ]] && apply_sddm_wallpaper "$push_sddm_bg"
+    fi
 }
 
 set_system_defaults() {
@@ -502,6 +533,14 @@ set_system_defaults() {
 
     # Fallback: install icon/cursor themes directly from local dirs (no custom theme)
     install_icons_system_wide
+
+    # Set system-wide default desktop wallpaper via Plasma plugin config
+    if [[ "${WALLPAPER:-}" == true && -d "/usr/share/wallpapers/gloam-dynamic" ]]; then
+        local wp_main_xml="/usr/share/plasma/wallpapers/org.kde.image/contents/config/main.xml"
+        if [[ -f "$wp_main_xml" ]]; then
+            sudo sed -i '/<entry name="Image"/,/<\/entry>/ s|<default>[^<]*</default>|<default>file:///usr/share/wallpapers/gloam-dynamic</default>|' "$wp_main_xml" 2>/dev/null || true
+        fi
+    fi
 
     # Set keyboard shortcut in /etc/xdg/kglobalshortcutsrc
     sudo kwriteconfig6 --file /etc/xdg/kglobalshortcutsrc --group "services" --group "$SHORTCUT_ID" --key "_launch" "Meta+Shift+L"
@@ -2721,6 +2760,16 @@ do_configure() {
                 if [[ "$sddm_wp_choice" =~ ^[Yy]$ ]]; then
                     setup_sddm_wallpaper
                     echo -e "  ${GREEN}SDDM backgrounds installed.${RESET}"
+                    # Apply SDDM wallpaper for current mode
+                    local current_laf_sddm
+                    current_laf_sddm=$(kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage 2>/dev/null)
+                    local sddm_variant="light"
+                    if [[ "$current_laf_sddm" == "$laf_dark" || "$current_laf_sddm" == "${BASE_THEME_DARK:-}" || "$current_laf_sddm" == "org.kde.custom.dark" ]]; then
+                        sddm_variant="dark"
+                    fi
+                    local initial_sddm_bg
+                    initial_sddm_bg=$({ compgen -G "/usr/local/lib/gloam/sddm-bg-${sddm_variant}.*" || true; } | head -1)
+                    [[ -n "$initial_sddm_bg" ]] && apply_sddm_wallpaper "$initial_sddm_bg"
                 fi
             fi
 
