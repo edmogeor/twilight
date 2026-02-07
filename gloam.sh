@@ -1987,6 +1987,18 @@ do_configure() {
     check_desktop_environment
     check_dependencies
 
+    # Show disclaimer on first run
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        echo ""
+        echo -e "${YELLOW}${BOLD}Disclaimer${RESET}"
+        echo "gloam modifies Plasma theme settings, system configs, and user files."
+        echo "It is recommended to back up your system before proceeding."
+        echo "The authors are not responsible for any system issues."
+        echo ""
+        read -rp "Continue? [y/N]: " disclaimer_choice
+        [[ ! "$disclaimer_choice" =~ ^[Yy]$ ]] && { echo "Aborted."; exit 0; }
+    fi
+
     # Parse modifiers first to know if this is a full or partial configure
     shift # Remove 'configure' from args
     local configure_all=true
