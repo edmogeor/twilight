@@ -1,7 +1,6 @@
 <div align="center">
   <h1>gloam</h1>
   <p><b>Syncs Kvantum, GTK, and custom scripts with Plasma 6's native light/dark (day/night) theme switching - and more.</b></p>
-  <p><a href="https://github.com/edmogeor/gloam/releases/tag/v1.0.0">v1.0.0</a></p>
   <img src="screenshots/example.gif" width="800" />
 </div>
 
@@ -159,6 +158,18 @@ Once configured, the service runs in the background. You usually don't need to t
 
 1.  **Native Integration (Optional):** If you choose, `gloam` can generate custom Plasma Global Themes containing your choices. These are set as your KDE defaults so Plasma handles the main switch natively.
 2.  **Bridging the Gap:** A lightweight background service monitors Plasma's state. When it detects a switch, it instantly applies the "external" settings that Plasma can't touch: changing Kvantum themes, updating GTK configs, reloading Konsole profiles, and running your custom scripts.
+
+## Releases
+
+**Latest:** [v1.0.0](https://github.com/edmogeor/gloam/releases/tag/v1.0.0)
+
+See the full [changelog](CHANGELOG.md) for details.
+
+To update an existing installation:
+
+```bash
+gloam update
+```
 
 ## Uninstallation
 

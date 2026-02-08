@@ -32,7 +32,7 @@ jobs:
           tag="${{ github.ref_name }}"
           version="${{ steps.version.outputs.version }}"
           sed -i "s/\"Version\": \"[^\"]*\"/\"Version\": \"${version}\"/" plasmoid/metadata.json
-          sed -i "s|releases/tag/v[^\"]*\">v[^<]*</|releases/tag/${tag}\">${tag}</|" README.md
+          sed -i "s|\*\*Latest:\*\* \[v[^]]*\](https://github.com/edmogeor/gloam/releases/tag/v[^)]*)|**Latest:** [${tag}](https://github.com/edmogeor/gloam/releases/tag/${tag})|" README.md
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add plasmoid/metadata.json README.md
