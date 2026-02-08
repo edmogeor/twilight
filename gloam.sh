@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+{
 #
 # gloam.sh
 # gloam: Syncs Kvantum, GTK, and custom scripts with Plasma 6's native light/dark (day/night) theme switching - and more.
@@ -243,7 +244,7 @@ check_for_updates() {
         local kp_args=(-t Plasma/Applet)
         [[ "$INSTALL_GLOBAL" == true ]] && kp_args+=(--global)
         if kpackagetool6 "${kp_args[@]}" --show "$PLASMOID_ID" &>/dev/null; then
-            gloam_cmd kpackagetool6 "${kp_args[@]}" --upgrade "$tmp_dir/plasmoid"
+            gloam_cmd kpackagetool6 "${kp_args[@]}" --upgrade "$tmp_dir/plasmoid" 2>/dev/null
         fi
     fi
 
@@ -1002,9 +1003,9 @@ install_plasmoid() {
 
     # Upgrade if already installed, otherwise install fresh
     if kpackagetool6 "${kp_args[@]}" --show "$PLASMOID_ID" &>/dev/null; then
-        gloam_cmd kpackagetool6 "${kp_args[@]}" --upgrade "$plasmoid_src"
+        gloam_cmd kpackagetool6 "${kp_args[@]}" --upgrade "$plasmoid_src" 2>/dev/null
     else
-        gloam_cmd kpackagetool6 "${kp_args[@]}" --install "$plasmoid_src"
+        gloam_cmd kpackagetool6 "${kp_args[@]}" --install "$plasmoid_src" 2>/dev/null
     fi
 
     echo -e "${GREEN}Installed Light/Dark Mode Toggle widget.${RESET}"
@@ -1016,12 +1017,12 @@ remove_plasmoid() {
 
     # Try removing local install
     if kpackagetool6 "${kp_args[@]}" --show "$PLASMOID_ID" &>/dev/null; then
-        kpackagetool6 "${kp_args[@]}" --remove "$PLASMOID_ID" && echo "Removed plasmoid (local)"
+        kpackagetool6 "${kp_args[@]}" --remove "$PLASMOID_ID" 2>/dev/null && echo "Removed plasmoid (local)"
     fi
 
     # Try removing global install
     if kpackagetool6 "${kp_args[@]}" --global --show "$PLASMOID_ID" &>/dev/null; then
-        sudo kpackagetool6 "${kp_args[@]}" --global --remove "$PLASMOID_ID" && echo "Removed plasmoid (global)"
+        sudo kpackagetool6 "${kp_args[@]}" --global --remove "$PLASMOID_ID" 2>/dev/null && echo "Removed plasmoid (global)"
     fi
     return 0
 }
@@ -3988,3 +3989,5 @@ case "${1:-}" in
         exit 1
         ;;
 esac
+exit 0
+}

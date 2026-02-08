@@ -3,7 +3,8 @@
 ## [1.0.2] - 2026-02-08
 
 ### Fixed
-- Self-update no longer corrupts the running script (use atomic mv instead of in-place cp)
+- Self-update no longer corrupts the running script (buffer entire script before executing, use atomic mv)
+- Suppress spurious `KPackageStructure` warnings from unrelated plasmoids during kpackagetool6 operations
 
 ## [1.0.1] - 2026-02-08
 
