@@ -222,10 +222,12 @@ check_for_updates() {
     gloam_cmd chmod +x "$cli_path"
 
     # Update the plasmoid if already installed
-    local plasmoid_path
-    plasmoid_path="$(get_plasmoid_path)"
-    if [[ -d "$plasmoid_path" && -d "$tmp_dir/plasmoid" ]]; then
-        gloam_cmd cp -r "$tmp_dir/plasmoid"/* "$plasmoid_path/"
+    if [[ -d "$tmp_dir/plasmoid" ]]; then
+        local kp_args=(-t Plasma/Applet)
+        [[ "$INSTALL_GLOBAL" == true ]] && kp_args+=(--global)
+        if kpackagetool6 "${kp_args[@]}" --show "$PLASMOID_ID" &>/dev/null; then
+            gloam_cmd kpackagetool6 "${kp_args[@]}" --upgrade "$tmp_dir/plasmoid"
+        fi
     fi
 
     rm -rf "$tmp_dir"
@@ -939,29 +941,41 @@ scan_plasma_styles() {
 }
 
 install_plasmoid() {
-    local script_dir install_dir
+    local script_dir
     script_dir="$(dirname "$(readlink -f "$0")")"
     local plasmoid_src="${script_dir}/plasmoid"
-    install_dir="$(get_plasmoid_path)"
 
     if [[ ! -d "$plasmoid_src" ]]; then
         echo -e "${RED}Error: Plasmoid source not found at $plasmoid_src${RESET}" >&2
         return 1
     fi
 
-    gloam_cmd mkdir -p "$install_dir"
-    gloam_cmd cp -r "$plasmoid_src"/* "$install_dir/"
+    local kp_args=(-t Plasma/Applet)
+    [[ "$INSTALL_GLOBAL" == true ]] && kp_args+=(--global)
 
-    echo -e "${GREEN}Installed Light/Dark Mode Toggle widget to $install_dir${RESET}"
+    # Upgrade if already installed, otherwise install fresh
+    if kpackagetool6 "${kp_args[@]}" --show "$PLASMOID_ID" &>/dev/null; then
+        gloam_cmd kpackagetool6 "${kp_args[@]}" --upgrade "$plasmoid_src"
+    else
+        gloam_cmd kpackagetool6 "${kp_args[@]}" --install "$plasmoid_src"
+    fi
+
+    echo -e "${GREEN}Installed Light/Dark Mode Toggle widget.${RESET}"
     echo "You can add it to your panel by right-clicking the panel > Add Widgets > Light/Dark Mode Toggle"
 }
 
 remove_plasmoid() {
-    local local_path="${HOME}/.local/share/plasma/plasmoids/${PLASMOID_ID}"
-    local global_path="/usr/share/plasma/plasmoids/${PLASMOID_ID}"
+    local kp_args=(-t Plasma/Applet)
 
-    [[ -d "$local_path" ]] && rm -rf "$local_path" && echo "Removed $local_path"
-    [[ -d "$global_path" ]] && sudo rm -rf "$global_path" && echo "Removed $global_path"
+    # Try removing local install
+    if kpackagetool6 "${kp_args[@]}" --show "$PLASMOID_ID" &>/dev/null; then
+        kpackagetool6 "${kp_args[@]}" --remove "$PLASMOID_ID" && echo "Removed plasmoid (local)"
+    fi
+
+    # Try removing global install
+    if kpackagetool6 "${kp_args[@]}" --global --show "$PLASMOID_ID" &>/dev/null; then
+        sudo kpackagetool6 "${kp_args[@]}" --global --remove "$PLASMOID_ID" && echo "Removed plasmoid (global)"
+    fi
     return 0
 }
 
