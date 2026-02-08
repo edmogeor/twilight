@@ -22,7 +22,7 @@ BLUE='\033[0;34m'
 RESET='\033[0m'
 
 # Version
-GLOAM_VERSION="1.0.2"
+GLOAM_VERSION="1.0.3"
 GLOAM_REPO="edmogeor/gloam"
 
 # Global installation mode flags
@@ -123,6 +123,22 @@ DELAY_LAF_PROPAGATE=1
 DELAY_PLASMA_POLL=0.25
 PLASMA_POLL_MAX=120
 
+# Expected config variables (must match the heredoc that writes gloam.conf)
+EXPECTED_CONFIG_VARS=(
+    LAF_LIGHT LAF_DARK KVANTUM_LIGHT KVANTUM_DARK ICON_LIGHT ICON_DARK
+    PLASMA_CHANGEICONS GTK_LIGHT GTK_DARK COLOR_LIGHT COLOR_DARK
+    STYLE_LIGHT STYLE_DARK DECORATION_LIGHT DECORATION_DARK
+    CURSOR_LIGHT CURSOR_DARK KONSOLE_LIGHT KONSOLE_DARK
+    SPLASH_LIGHT SPLASH_DARK SDDM_LIGHT SDDM_DARK
+    APPSTYLE_LIGHT APPSTYLE_DARK WALLPAPER WP_SOURCE_LIGHT WP_SOURCE_DARK
+    SCRIPT_LIGHT SCRIPT_DARK CUSTOM_THEME_LIGHT CUSTOM_THEME_DARK
+    BASE_THEME_LIGHT BASE_THEME_DARK THEME_INSTALL_GLOBAL WALLPAPER_BASE
+    ICON_LIGHT_MOVED_FROM ICON_DARK_MOVED_FROM
+    CURSOR_LIGHT_MOVED_FROM CURSOR_DARK_MOVED_FROM
+    INSTALL_GLOBAL PUSH_TO_USERS SET_SYSTEM_DEFAULTS COPY_DESKTOP_LAYOUT
+    INSTALL_CLI INSTALL_WIDGET INSTALL_SHORTCUT
+)
+
 # Run a command with sudo if global install mode, otherwise run directly
 gloam_cmd() {
     if [[ "$INSTALL_GLOBAL" == true ]]; then
@@ -183,7 +199,7 @@ install_cli_binary() {
     if [[ "$(realpath "$0")" != "$(realpath "$cli_path" 2>/dev/null)" ]]; then
         gloam_cmd cp "$0" "$cli_path"
     fi
-    gloam_cmd chmod +x "$cli_path"
+    gloam_cmd chmod 755 "$cli_path"
 }
 
 # Check for updates from GitHub releases and optionally apply them
@@ -236,7 +252,7 @@ check_for_updates() {
     cli_dir="$(dirname "$cli_path")"
     tmp_cli=$(gloam_cmd mktemp "${cli_dir}/gloam.XXXXXX")
     gloam_cmd cp "$tmp_dir/gloam.sh" "$tmp_cli"
-    gloam_cmd chmod +x "$tmp_cli"
+    gloam_cmd chmod 755 "$tmp_cli"
     gloam_cmd mv "$tmp_cli" "$cli_path"
 
     # Update the plasmoid if already installed
@@ -339,62 +355,72 @@ ask_global_install() {
 
         INSTALL_GLOBAL=true
 
-        # Ask about pushing to other users
-        ask_push_to_users
-
-        # Ask about system defaults for new users
-        ask_system_defaults
-
-        # Ask about copying desktop settings if either push or defaults was selected
-        if [[ "${PUSH_TO_USERS:-}" == true || "${SET_SYSTEM_DEFAULTS:-}" == true ]]; then
-            echo ""
-            echo -e "${BOLD}Copy Desktop Settings${RESET}"
-            echo "Copy the following settings to new/existing users:"
-            echo "  - Panel layout, positions and widgets (plasmoids)"
-            echo "  - Mouse and touchpad settings"
-            echo "  - Window manager effects and tiling"
-            echo "  - Keyboard shortcuts"
-            echo "  - Desktop and lock screen wallpapers"
-            echo "  - App settings (Dolphin, Konsole profiles, KRunner)"
-            echo ""
-            read -rp "Copy desktop settings? [y/N]: " desktop_choice
-            [[ "$desktop_choice" =~ ^[Yy]$ ]] && COPY_DESKTOP_LAYOUT=true
-        fi
+        # Ask about applying settings to other users
+        ask_apply_to_users
     fi
 }
 
-ask_push_to_users() {
+ask_apply_to_users() {
     # Find real users (UID 1000-60000, has home dir under /home, not current user)
     local users=()
     while IFS=: read -r username _ uid _ _ home _; do
         [[ "$uid" -ge 1000 && "$uid" -lt 60000 && "$home" == /home/* && -d "$home" && "$username" != "$USER" ]] && users+=("$username:$home")
     done < /etc/passwd
 
-    if [[ ${#users[@]} -eq 0 ]]; then
-        return
+    local has_other_users=false
+    [[ ${#users[@]} -gt 0 ]] && has_other_users=true
+
+    echo ""
+    echo -e "${BOLD}Apply to Other Users${RESET}"
+    echo "Your configuration can be applied to other users on this system."
+    echo ""
+
+    if [[ "$has_other_users" == true ]]; then
+        echo "  1) Existing users only"
+        echo "  2) New users only (set as system defaults)"
+        echo "  3) Both existing and new users"
+        echo "  4) Neither"
+        echo ""
+        read -rp "Apply settings to other users? [1-4] (default: 4): " choice
+        case "$choice" in
+            1)
+                SELECTED_USERS=("${users[@]}")
+                PUSH_TO_USERS=true
+                ;;
+            2)
+                SET_SYSTEM_DEFAULTS=true
+                ;;
+            3)
+                SELECTED_USERS=("${users[@]}")
+                PUSH_TO_USERS=true
+                SET_SYSTEM_DEFAULTS=true
+                ;;
+            *)
+                return
+                ;;
+        esac
+    else
+        read -rp "Set as system defaults for new users? [y/N]: " choice
+        if [[ "$choice" =~ ^[Yy]$ ]]; then
+            SET_SYSTEM_DEFAULTS=true
+        else
+            return
+        fi
     fi
 
+    # Ask about copying desktop settings
     echo ""
-    echo -e "${BOLD}Push to Existing Users${RESET}"
-    echo "Copy your theme configuration to all other users on this system."
+    echo -e "${BOLD}Copy Desktop Settings${RESET}"
+    echo "Also copy the following settings:"
+    echo "  - Panel layout, positions and widgets (plasmoids)"
+    echo "  - Mouse and touchpad settings"
+    echo "  - Window manager effects and tiling"
+    echo "  - Keyboard shortcuts"
+    echo "  - Desktop and lock screen wallpapers"
+    echo "  - App settings (Dolphin, Konsole profiles, KRunner)"
     echo ""
-
-    read -rp "Push settings to all other users? [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        SELECTED_USERS=("${users[@]}")
-        PUSH_TO_USERS=true
-    fi
-}
-
-ask_system_defaults() {
-    echo ""
-    echo -e "${BOLD}System Defaults${RESET}"
-    echo "Set these themes as defaults for NEW users created on this system."
-    echo "Existing users are not affected by this option."
-    echo ""
-
-    read -rp "Set system defaults for new users? [y/N]: " choice
-    [[ "$choice" =~ ^[Yy]$ ]] && SET_SYSTEM_DEFAULTS=true
+    read -rp "Copy desktop settings? [y/N]: " desktop_choice
+    [[ "$desktop_choice" =~ ^[Yy]$ ]] && COPY_DESKTOP_LAYOUT=true
 }
 
 install_icons_system_wide() {
@@ -1473,46 +1499,14 @@ has_bundleable_options() {
        -n "${APPSTYLE_LIGHT:-}" || -n "${APPSTYLE_DARK:-}" ]]
 }
 
-# Prompt user for global vs local theme install, authenticate sudo if needed
+# Set theme install directory based on installation mode
 request_sudo_for_global_install() {
-    # If already in global install mode, use global paths automatically
+    THEME_INSTALL_DIR="$(get_theme_install_dir)"
     if [[ "$INSTALL_GLOBAL" == true ]]; then
-        THEME_INSTALL_DIR="$(get_theme_install_dir)"
         THEME_INSTALL_GLOBAL=true
-        echo "Custom themes will be installed globally (matching your installation mode)."
-        return 0
+    else
+        THEME_INSTALL_GLOBAL=false
     fi
-
-    echo ""
-    echo -e "${BOLD}Custom Theme Installation${RESET}"
-    echo "Your theme overrides can be saved as custom Plasma themes."
-    echo ""
-    echo "Installation options:"
-    echo "  Global: /usr/share/plasma/look-and-feel/ (requires sudo)"
-    echo "  Local:  ~/.local/share/plasma/look-and-feel/ (user only)"
-    echo ""
-
-    read -rp "Install themes globally? [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo "Requesting sudo access..."
-        if sudo -v; then
-            THEME_INSTALL_DIR="/usr/share/plasma/look-and-feel"
-            THEME_INSTALL_GLOBAL=true
-            echo -e "${GREEN}Sudo authenticated. Themes will be installed globally.${RESET}"
-            return 0
-        else
-            echo -e "${YELLOW}Sudo authentication failed.${RESET}"
-            read -rp "Install locally instead? [Y/n]: " fallback
-            if [[ "$fallback" =~ ^[Nn]$ ]]; then
-                echo "Skipping custom theme generation."
-                return 1
-            fi
-        fi
-    fi
-
-    THEME_INSTALL_DIR="${HOME}/.local/share/plasma/look-and-feel"
-    THEME_INSTALL_GLOBAL=false
-    echo "Themes will be installed locally."
     return 0
 }
 
@@ -2017,6 +2011,9 @@ do_watch() {
     if [[ ! -f "$CONFIG_FILE" ]]; then
         die "No config found at $CONFIG_FILE. Run configure first."
     fi
+    if ! check_config_valid; then
+        log "WARNING: Configuration is outdated or incompatible. Please run 'gloam configure' to reconfigure."
+    fi
     # shellcheck source=/dev/null
     source "$CONFIG_FILE"
 
@@ -2063,9 +2060,21 @@ do_watch() {
     done
 }
 
+check_config_valid() {
+    [[ ! -f "$CONFIG_FILE" ]] && return 0
+    local file_vars expected_vars
+    file_vars=$(grep -oP '^[A-Z_]+(?==)' "$CONFIG_FILE" | sort)
+    expected_vars=$(printf '%s\n' "${EXPECTED_CONFIG_VARS[@]}" | sort)
+    [[ "$file_vars" == "$expected_vars" ]] && return 0
+    return 1
+}
+
 load_config_strict() {
     if [[ ! -f "$CONFIG_FILE" ]]; then
         die "No config found at $CONFIG_FILE. Run configure first."
+    fi
+    if ! check_config_valid; then
+        die "Your configuration is outdated or incompatible. Please run 'gloam configure' to reconfigure."
     fi
     # shellcheck source=/dev/null
     source "$CONFIG_FILE"
@@ -2394,6 +2403,9 @@ do_configure() {
         clean_app_overrides
     # Load existing config if modifying specific options (includes INSTALL_GLOBAL)
     elif [[ "$configure_all" == false && -f "$CONFIG_FILE" ]]; then
+        if ! check_config_valid; then
+            die "Your configuration is outdated or incompatible. Please run 'gloam configure' to reconfigure."
+        fi
         # shellcheck source=/dev/null
         source "$CONFIG_FILE"
         # Authenticate sudo if this is a global installation
@@ -3188,7 +3200,12 @@ do_configure() {
     elif has_bundleable_options; then
         # First time - ask user if they want custom themes
         echo ""
-        read -rp "Generate custom themes from your selections? [Y/n]: " gen_choice
+        echo -e "${BOLD}Custom Themes${RESET}"
+        echo "Bundles your selections into native Plasma themes so overrides are applied"
+        echo "automatically during theme switches — no manual reapplication needed."
+        echo ""
+        echo -ne "Generate custom themes from your selections? (${BOLD}Recommended${RESET}) [Y/n]: "
+        read -r gen_choice
         if [[ ! "$gen_choice" =~ ^[Nn]$ ]]; then
             if request_sudo_for_global_install; then
                 echo ""

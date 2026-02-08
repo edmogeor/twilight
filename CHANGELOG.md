@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.0.3] - 2026-02-08
+
+### Added
+- Validate config file against expected variables on load; warn if outdated or incompatible after an update
+
+### Fixed
+- CLI binary installed with `chmod 755` instead of `chmod +x` so non-root users can read and execute it
+
 ## [1.0.2] - 2026-02-08
 
 ### Fixed
