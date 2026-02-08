@@ -13,6 +13,18 @@ curl -fsS https://api.github.com/repos/edmogeor/gloam/releases/latest \
 cd gloam-* && ./gloam.sh configure
 ```
 
+## Releases
+
+**Latest:** [v1.0.0](https://github.com/edmogeor/gloam/releases/tag/v1.0.0)
+
+See the full [changelog](CHANGELOG.md) for details.
+
+To update an existing installation:
+
+```bash
+gloam update
+```
+
 ---
 
 **gloam** solves a common problem in KDE Plasma: **external themes don't switch automatically.**
@@ -158,18 +170,6 @@ Once configured, the service runs in the background. You usually don't need to t
 
 1.  **Native Integration (Optional):** If you choose, `gloam` can generate custom Plasma Global Themes containing your choices. These are set as your KDE defaults so Plasma handles the main switch natively.
 2.  **Bridging the Gap:** A lightweight background service monitors Plasma's state. When it detects a switch, it instantly applies the "external" settings that Plasma can't touch: changing Kvantum themes, updating GTK configs, reloading Konsole profiles, and running your custom scripts.
-
-## Releases
-
-**Latest:** [v1.0.0](https://github.com/edmogeor/gloam/releases/tag/v1.0.0)
-
-See the full [changelog](CHANGELOG.md) for details.
-
-To update an existing installation:
-
-```bash
-gloam update
-```
 
 ## Uninstallation
 
