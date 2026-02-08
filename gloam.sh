@@ -21,7 +21,7 @@ BLUE='\033[0;34m'
 RESET='\033[0m'
 
 # Version
-GLOAM_VERSION="1.0.0"
+GLOAM_VERSION="1.0.1"
 GLOAM_REPO="edmogeor/gloam"
 
 # Global installation mode flags
@@ -32,6 +32,9 @@ SELECTED_USERS=()
 
 # Global installation marker file
 GLOBAL_INSTALL_MARKER="/etc/gloam.admin"
+
+# Keys added by gloam to /etc/xdg/kdeglobals (populated during install, read during removal)
+XDG_KEYS_ADDED=()
 
 # Global scripts directory
 GLOBAL_SCRIPTS_DIR="/usr/local/share/gloam"
@@ -47,6 +50,17 @@ UX_CONFIGS=(
     dolphinrc
     konsolerc
     breezerc
+    kcmfonts
+)
+
+# Font keys to copy from kdeglobals (group:key format)
+FONT_KEYS=(
+    "General:font"
+    "General:fixed"
+    "General:smallestReadableFont"
+    "General:toolBarFont"
+    "General:menuFont"
+    "WM:activeFont"
 )
 
 # Log file
@@ -271,12 +285,26 @@ check_existing_global_install() {
     return 1
 }
 
+# Write a key to /etc/xdg/kdeglobals, tracking newly added keys for clean removal
+write_xdg_default() {
+    local file="$1" group="$2" key="$3" value="$4"
+    local existing
+    existing=$(sudo kreadconfig6 --file "$file" --group "$group" --key "$key" 2>/dev/null) || true
+    [[ -z "$existing" ]] && XDG_KEYS_ADDED+=("${group}:${key}")
+    sudo kwriteconfig6 --file "$file" --group "$group" --key "$key" "$value"
+}
+
 # Write global installation marker
 write_global_install_marker() {
     [[ "$INSTALL_GLOBAL" != true ]] && return
+    local added_keys=""
+    if [[ ${#XDG_KEYS_ADDED[@]} -gt 0 ]]; then
+        added_keys=$(IFS=,; echo "${XDG_KEYS_ADDED[*]}")
+    fi
     sudo tee "$GLOBAL_INSTALL_MARKER" > /dev/null <<EOF
 user=$USER
 date=$(date '+%Y-%m-%d %H:%M')
+xdg_keys_added=$added_keys
 EOF
 }
 
@@ -479,11 +507,19 @@ push_config_to_users() {
                 sudo chown "$username:" "${homedir}/.config/plasma-org.kde.plasma.desktop-appletsrc"
             fi
 
-            # UX config files (panels, input, window manager, shortcuts, apps)
+            # UX config files (panels, input, window manager, shortcuts, apps, font rendering)
             for cfg in "${UX_CONFIGS[@]}"; do
                 [[ -f "${HOME}/.config/${cfg}" ]] || continue
                 sudo cp "${HOME}/.config/${cfg}" "${homedir}/.config/${cfg}"
                 sudo chown "$username:" "${homedir}/.config/${cfg}"
+            done
+
+            # Copy font settings from kdeglobals
+            for entry in "${FONT_KEYS[@]}"; do
+                local group="${entry%%:*}" key="${entry#*:}" val
+                val=$(kreadconfig6 --file kdeglobals --group "$group" --key "$key" 2>/dev/null) || continue
+                [[ -n "$val" ]] && sudo -u "$username" kwriteconfig6 --file "${homedir}/.config/kdeglobals" \
+                    --group "$group" --key "$key" "$val" 2>/dev/null || true
             done
 
             # Rewrite gloam wallpaper paths in lock screen config
@@ -565,9 +601,9 @@ set_system_defaults() {
     # Set default light/dark themes in /etc/xdg/kdeglobals
     local xdg_globals="/etc/xdg/kdeglobals"
     sudo mkdir -p /etc/xdg
-    sudo kwriteconfig6 --file "$xdg_globals" --group KDE --key DefaultLightLookAndFeel "${LAF_LIGHT:-}"
-    sudo kwriteconfig6 --file "$xdg_globals" --group KDE --key DefaultDarkLookAndFeel "${LAF_DARK:-}"
-    sudo kwriteconfig6 --file "$xdg_globals" --group KDE --key AutomaticLookAndFeel true
+    write_xdg_default "$xdg_globals" KDE DefaultLightLookAndFeel "${LAF_LIGHT:-}"
+    write_xdg_default "$xdg_globals" KDE DefaultDarkLookAndFeel "${LAF_DARK:-}"
+    write_xdg_default "$xdg_globals" KDE AutomaticLookAndFeel true
 
     # Copy gloam config to /etc/skel so new users get it
     sudo mkdir -p /etc/skel/.config
@@ -583,7 +619,7 @@ set_system_defaults() {
                 /etc/skel/.config/plasma-org.kde.plasma.desktop-appletsrc
         fi
 
-        # UX config files (panels, input, window manager, shortcuts, apps)
+        # UX config files (panels, input, window manager, shortcuts, apps, font rendering)
         local ux_configs=(
             plasmashellrc
             kcminputrc
@@ -594,10 +630,18 @@ set_system_defaults() {
             dolphinrc
             konsolerc
             breezerc
+            kcmfonts
         )
         for cfg in "${ux_configs[@]}"; do
             [[ -f "${HOME}/.config/${cfg}" ]] || continue
             sudo cp "${HOME}/.config/${cfg}" "/etc/skel/.config/${cfg}"
+        done
+
+        # Copy font settings to system-wide kdeglobals defaults
+        for entry in "${FONT_KEYS[@]}"; do
+            local group="${entry%%:*}" key="${entry#*:}" val
+            val=$(kreadconfig6 --file kdeglobals --group "$group" --key "$key" 2>/dev/null) || continue
+            [[ -n "$val" ]] && write_xdg_default "$xdg_globals" "$group" "$key" "$val"
         done
 
         # Rewrite gloam wallpaper paths in lock screen config
@@ -3627,10 +3671,23 @@ do_remove() {
         dolphinrc
         konsolerc
         breezerc
+        kcmfonts
     )
     for cfg in "${skel_ux_files[@]}"; do
         [[ -f "/etc/skel/.config/${cfg}" ]] && sudo rm "/etc/skel/.config/${cfg}" && echo "Removed /etc/skel/.config/${cfg}" || true
     done
+    # Remove only the keys gloam added to /etc/xdg/kdeglobals
+    if [[ -f /etc/xdg/kdeglobals && -f "$GLOBAL_INSTALL_MARKER" ]]; then
+        local added_keys_csv
+        added_keys_csv=$(grep "^xdg_keys_added=" "$GLOBAL_INSTALL_MARKER" 2>/dev/null | cut -d= -f2-)
+        if [[ -n "$added_keys_csv" ]]; then
+            IFS=',' read -ra added_keys <<< "$added_keys_csv"
+            for entry in "${added_keys[@]}"; do
+                local group="${entry%%:*}" key="${entry#*:}"
+                sudo kwriteconfig6 --file /etc/xdg/kdeglobals --group "$group" --key "$key" --delete 2>/dev/null || true
+            done
+        fi
+    fi
     [[ -d /etc/skel/.local/share/plasma/plasmoids ]] && sudo rm -rf /etc/skel/.local/share/plasma/plasmoids && echo "Removed /etc/skel/.local/share/plasma/plasmoids" || true
     [[ -d /etc/skel/.local/share/konsole ]] && sudo rm -rf /etc/skel/.local/share/konsole && echo "Removed /etc/skel/.local/share/konsole" || true
 
