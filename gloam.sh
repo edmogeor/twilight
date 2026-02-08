@@ -7,6 +7,8 @@
 #                        With no options, configures all. With options, only reconfigures specified types.
 #   uninstall            Stop service, remove all installed files
 #   status               Show service status and current configuration
+#   update               Check for and install the latest version
+#   version              Show the installed version
 
 set -euo pipefail
 
@@ -17,6 +19,10 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 RESET='\033[0m'
+
+# Version
+GLOAM_VERSION="1.0.0"
+GLOAM_REPO="edmogeor/gloam"
 
 # Global installation mode flags
 INSTALL_GLOBAL=false
@@ -163,6 +169,73 @@ install_cli_binary() {
         gloam_cmd cp "$0" "$cli_path"
     fi
     gloam_cmd chmod +x "$cli_path"
+}
+
+# Check for updates from GitHub releases and optionally apply them
+# Arguments: $1 = "verbose" to print "already up to date" message
+check_for_updates() {
+    local verbose="${1:-}"
+    local api_url="https://api.github.com/repos/${GLOAM_REPO}/releases/latest"
+
+    local response
+    response=$(curl -fsSL --max-time 3 "$api_url" 2>/dev/null) || {
+        [[ "$verbose" == "verbose" ]] && echo "Could not check for updates (network error or no releases found)."
+        return 1
+    }
+
+    local remote_tag
+    remote_tag=$(printf '%s' "$response" | grep '"tag_name"' | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+    [[ -z "$remote_tag" ]] && return 1
+
+    local remote_version="${remote_tag#v}"
+
+    # Compare versions: if remote <= current, we're up to date
+    local newest
+    newest=$(printf '%s\n%s\n' "$GLOAM_VERSION" "$remote_version" | sort -V | tail -n1)
+    if [[ "$newest" == "$GLOAM_VERSION" ]]; then
+        [[ "$verbose" == "verbose" ]] && echo "Already up to date (v${GLOAM_VERSION})."
+        return 1
+    fi
+
+    echo -e "${BLUE}Update available:${RESET} v${GLOAM_VERSION} → v${remote_version}"
+
+    local tarball_url
+    tarball_url=$(printf '%s' "$response" | grep '"tarball_url"' | sed 's/.*"tarball_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+    if [[ -z "$tarball_url" ]]; then
+        echo "Could not find download URL in release. Update manually from https://github.com/${GLOAM_REPO}/releases"
+        return 1
+    fi
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+
+    if ! curl -fsSL --max-time 30 "$tarball_url" | tar xz -C "$tmp_dir" --strip-components=1; then
+        echo "Failed to download update."
+        rm -rf "$tmp_dir"
+        return 1
+    fi
+
+    # Update the CLI binary
+    local cli_path
+    cli_path="$(get_cli_path)"
+    gloam_cmd cp "$tmp_dir/gloam.sh" "$cli_path"
+    gloam_cmd chmod +x "$cli_path"
+
+    # Update the plasmoid if already installed
+    local plasmoid_path
+    plasmoid_path="$(get_plasmoid_path)"
+    if [[ -d "$plasmoid_path" && -d "$tmp_dir/plasmoid" ]]; then
+        gloam_cmd cp -r "$tmp_dir/plasmoid"/* "$plasmoid_path/"
+    fi
+
+    rm -rf "$tmp_dir"
+
+    echo -e "${GREEN}Updated to v${remote_version}.${RESET}"
+    return 0
+}
+
+do_update() {
+    check_for_updates "verbose"
 }
 
 # Check for existing global installation
@@ -2020,6 +2093,15 @@ do_configure() {
     check_desktop_environment
     check_dependencies
 
+    # Check for updates silently; if updated, re-exec with the new binary
+    if check_for_updates; then
+        local cli_path
+        cli_path="$(get_cli_path)"
+        if [[ -x "$cli_path" ]]; then
+            exec "$cli_path" "$@"
+        fi
+    fi
+
     # Parse modifiers first to know if this is a full or partial configure
     shift # Remove 'configure' from args
     local configure_all=true
@@ -3795,6 +3877,8 @@ Commands:
   toggle       Toggle between Light and Dark mode
   remove       Stop service, remove all installed files and widget
   status       Show service status and current configuration
+  update       Check for and install the latest version
+  version      Show the installed version
   help         Show this help message
 
 Run '$0 configure --help' for detailed configuration options.
@@ -3809,6 +3893,8 @@ case "${1:-}" in
     toggle)    do_toggle ;;
     remove)    do_remove ;;
     status)    do_status ;;
+    update)    do_update ;;
+    version|--version|-v) echo "gloam ${GLOAM_VERSION}" ;;
     ""|help|-h|--help) show_help ;;
     *)
         echo "Usage: $0 <command> [options]"

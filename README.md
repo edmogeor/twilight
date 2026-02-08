@@ -9,8 +9,10 @@
 ### Quick Start
 
 ```bash
-git clone https://github.com/edmogeor/gloam.git
-cd gloam && ./gloam.sh configure
+curl -fsS https://api.github.com/repos/edmogeor/gloam/releases/latest \
+  | grep -o '"tarball_url": "[^"]*"' | cut -d'"' -f4 \
+  | xargs curl -fsSL | tar xz
+cd gloam-* && ./gloam.sh configure
 ```
 
 ---
@@ -77,11 +79,13 @@ flatpak install org.kde.KStyle.Kvantum
 
 ## Installation & Configuration
 
-Clone the repository and run the configuration wizard:
+Download the latest release and run the configuration wizard:
 
 ```bash
-git clone https://github.com/edmogeor/gloam.git
-cd gloam && ./gloam.sh configure
+curl -fsS https://api.github.com/repos/edmogeor/gloam/releases/latest \
+  | grep -o '"tarball_url": "[^"]*"' | cut -d'"' -f4 \
+  | xargs curl -fsSL | tar xz
+cd gloam-* && ./gloam.sh configure
 ```
 
 The `configure` command will:
@@ -148,6 +152,8 @@ Once configured, the service runs in the background. You usually don't need to t
 | `gloam dark` | Switch to dark mode (and sync all sub-themes). |
 | `gloam toggle` | Toggle between light and dark modes (also via Meta+Shift+L). |
 | `gloam remove` | Stop the service and remove all installed files. |
+| `gloam update` | Check for and install the latest version. |
+| `gloam version` | Show the installed version. |
 | `gloam watch` | Run the monitor in the foreground (used by the service). |
 
 ## How It Works

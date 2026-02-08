@@ -1,0 +1,57 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify script version matches tag
+        run: |
+          script_version=$(grep '^GLOAM_VERSION=' gloam.sh | sed 's/GLOAM_VERSION="\(.*\)"/\1/')
+          if [[ "$script_version" != "${{ steps.version.outputs.version }}" ]]; then
+            echo "::error::Tag version (${{ steps.version.outputs.version }}) does not match GLOAM_VERSION in gloam.sh ($script_version)"
+            exit 1
+          fi
+
+      - name: Sync plasmoid version to tag
+        run: |
+          sed -i 's/"Version": "[^"]*"/"Version": "${{ steps.version.outputs.version }}"/' plasmoid/metadata.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add plasmoid/metadata.json
+          git diff --cached --quiet || git commit -m "Sync plasmoid version to ${{ github.ref_name }}"
+          git push origin HEAD:main
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          # Extract the section between this version's heading and the next heading (or EOF)
+          changelog=$(awk "/^## \\[${version}\\]/{found=1; next} /^## \\[/{if(found) exit} found" CHANGELOG.md)
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "$changelog"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "${{ steps.changelog.outputs.body }}"
