@@ -4,8 +4,6 @@
   <img src="screenshots/example.gif" width="800" />
 </div>
 
-> ⚠️ **Warning:** This project is in active development. Features may change, break, or be incomplete.
-
 ### Quick Start
 
 ```bash
