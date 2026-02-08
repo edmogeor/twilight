@@ -96,6 +96,11 @@ SERVICE_NAME="gloam"
 PLASMOID_ID="org.kde.plasma.lightdarktoggle"
 SHORTCUT_ID="gloam-toggle.desktop"
 
+# Delays (seconds) for KDE to finish writing configs after LookAndFeel apply
+DELAY_LAF_SETTLE=0.4
+DELAY_LAF_PROPAGATE=1.2
+DELAY_PLASMA_INIT=0.8
+
 # Run a command with sudo if global install mode, otherwise run directly
 gloam_cmd() {
     if [[ "$INSTALL_GLOBAL" == true ]]; then
@@ -959,28 +964,6 @@ get_laf() {
     kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage
 }
 
-# Poll a config file's mtime until it stabilizes (stops being modified).
-# Returns once mtime is unchanged for required_stable consecutive checks
-# (each 0.1s apart), or when max_checks is exhausted.
-wait_for_config_settle() {
-    local file="$1"
-    local max_checks="${2:-30}"
-    local required_stable="${3:-3}"
-    local checks=0 stable=0 last_mtime=""
-    while (( checks < max_checks )); do
-        local current_mtime
-        current_mtime=$(stat -c '%y' "$file" 2>/dev/null || echo "0")
-        if [[ -n "$last_mtime" && "$current_mtime" == "$last_mtime" ]]; then
-            (( ++stable >= required_stable )) && return 0
-        else
-            stable=0
-        fi
-        last_mtime="$current_mtime"
-        sleep 0.1
-        (( checks++ ))
-    done
-}
-
 reload_laf_config() {
     LAF_LIGHT=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel)
     LAF_DARK=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel)
@@ -1100,8 +1083,8 @@ apply_konsole_profile() {
 apply_splash() {
     local splash="$1"
     if [[ -n "$splash" ]]; then
-        # Wait for KDE to finish applying LookAndFeel (which overwrites ksplashrc)
-        wait_for_config_settle "$HOME/.config/ksplashrc" 50 3
+        # Delay to let KDE finish applying LookAndFeel (which overwrites ksplashrc)
+        sleep "$DELAY_LAF_PROPAGATE"
         # When "None" is selected, set Engine to "none" first to disable splash screen
         # (otherwise KDE uses KSplashQML which still shows a splash)
         if [[ "$splash" == "None" ]]; then
@@ -1121,8 +1104,8 @@ apply_splash() {
 apply_sddm_theme() {
     local theme="$1"
     if [[ -n "$theme" ]]; then
-        # Wait for KDE to finish applying LookAndFeel
-        wait_for_config_settle "$HOME/.config/kwinrc" 50 3
+        # Delay to let KDE finish applying LookAndFeel
+        sleep "$DELAY_LAF_PROPAGATE"
         if [[ -x /usr/local/lib/gloam/set-sddm-theme ]]; then
             sudo /usr/local/lib/gloam/set-sddm-theme "$theme" 2>/dev/null || warn "Failed to apply SDDM theme: $theme"
         else
@@ -1780,7 +1763,7 @@ apply_theme() {
         log "Applying theme: $laf"
     fi
     # Wait for LookAndFeel to finish applying before overriding settings
-    wait_for_config_settle "$HOME/.config/kdeglobals" 30 3
+    sleep "$DELAY_LAF_SETTLE"
 
     # Determine which mode we're switching to
     local mode
@@ -1896,17 +1879,7 @@ do_watch() {
     log "Watcher started"
 
     # Wait for Plasma to fully initialize before applying theme
-    local wait_count=0
-    while ! dbus-send --session --dest=org.freedesktop.DBus --print-reply \
-        /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner \
-        string:"org.kde.plasmashell" 2>/dev/null | grep -q "boolean true"; do
-        if (( wait_count >= 120 )); then
-            log "Plasma shell not detected after 30s, proceeding anyway"
-            break
-        fi
-        sleep 0.25
-        (( wait_count++ ))
-    done
+    sleep "$DELAY_PLASMA_INIT"
 
     PREV_LAF=$(get_laf)
     log "Initial theme: $PREV_LAF"
