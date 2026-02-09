@@ -814,7 +814,6 @@ get_friendly_name() {
 show_laf_reminder() {
     echo -e "${YELLOW}Reminder:${RESET} Make sure your Light and Dark themes are set to your preferred themes."
     echo "You can set them in: System Settings > Quick Settings"
-    echo ""
 }
 
 scan_kvantum_themes() {
@@ -1145,17 +1144,18 @@ cleanup_stale() {
     local local_service="${HOME}/.config/systemd/user/${SERVICE_NAME}.service"
 
     if systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-        systemctl --user stop "$SERVICE_NAME" 2>/dev/null
+        systemctl --user stop "$SERVICE_NAME" >/dev/null 2>&1
         dirty=1
     fi
     if systemctl --user is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
-        systemctl --user disable "$SERVICE_NAME" 2>/dev/null
+        systemctl --user disable "$SERVICE_NAME" >/dev/null 2>&1
         dirty=1
     fi
     [[ -f "$local_service" ]] && rm "$local_service" && dirty=1
     [[ -f "$CONFIG_FILE" ]] && rm "$CONFIG_FILE" && dirty=1
     if [[ "$dirty" -eq 1 ]]; then
         systemctl --user daemon-reload
+        echo ""
         echo -e "${GREEN}Cleaned up previous installation.${RESET}"
     fi
 }
@@ -2447,7 +2447,6 @@ do_configure() {
         echo ""
         echo -e "☀️ Light theme: ${BOLD}$(get_friendly_name laf "$laf_light")${RESET}"
         echo -e "🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark")${RESET}"
-        echo ""
         cleanup_stale
         # Remove app-specific overrides so they follow the global theme
         clean_app_overrides
@@ -2517,7 +2516,6 @@ do_configure() {
     fi
     echo -e "☀️ Light theme: ${BOLD}$(get_friendly_name laf "$laf_light")${RESET}"
     echo -e "🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark")${RESET}"
-    echo ""
 
     if [[ "$laf_light" == "$laf_dark" ]]; then
         echo -e "${RED}Error: ☀️ Light and 🌙 Dark LookAndFeel are the same ($laf_light).${RESET}" >&2
@@ -3717,8 +3715,8 @@ do_remove() {
                 fi
             done
             echo "Reset Flatpak theme overrides"
-        else
-            # Fallback for installs before tracking
+        elif [[ -f "$CONFIG_FILE" ]] && grep -qE "^GTK_(LIGHT|DARK)=.+" "$CONFIG_FILE" 2>/dev/null; then
+            # Fallback for installs before tracking (only if gloam configured GTK themes)
             local flatpak_overrides="${HOME}/.local/share/flatpak/overrides/global"
             if [[ -f "$flatpak_overrides" ]] && grep -q "GTK_THEME" "$flatpak_overrides" 2>/dev/null; then
                 flatpak override --user --unset-env=GTK_THEME 2>/dev/null || true
