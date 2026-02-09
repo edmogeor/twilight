@@ -29,12 +29,23 @@
 
 set -euo pipefail
 
-# ANSI Colors
+# --- Colour palette (indigo accent) ---
+# gum style colours (ANSI 256-colour)
+# Chosen to work on both light and dark terminal backgrounds.
+CLR_PRIMARY="99"        # indigo
+CLR_SECONDARY="105"     # light indigo
+CLR_SUCCESS="35"        # green (visible on light & dark)
+CLR_WARNING="214"       # amber/yellow
+CLR_ERROR="196"         # red
+CLR_MUTED="243"         # mid-grey (good contrast on both backgrounds)
+CLR_ACCENT="135"        # purple-indigo for highlights
+
+# ANSI fallbacks (for log file output & non-interactive paths)
 BOLD='\033[1m'
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
+BLUE='\033[38;5;99m'
 RESET='\033[0m'
 
 # Version
@@ -98,7 +109,7 @@ LOG_MAX_SIZE=102400  # 100KB
 
 log() {
     local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
-    echo "$msg"
+    msg_info "$*"
     mkdir -p "$LOG_DIR"
     # Truncate if too large
     if [[ -f "$LOG_FILE" ]] && (( $(stat -c%s "$LOG_FILE" 2>/dev/null || echo 0) > LOG_MAX_SIZE )); then
@@ -109,14 +120,18 @@ log() {
 
 warn() {
     local msg="$*"
-    echo -e "${YELLOW}Warning: ${msg}${RESET}" >&2
-    log "WARN: $msg"
+    msg_warn "$msg"
+    local ts="[$(date '+%Y-%m-%d %H:%M:%S')] WARN: $msg"
+    mkdir -p "$LOG_DIR"
+    echo "$ts" >> "$LOG_FILE"
 }
 
 die() {
     local msg="$*"
-    echo -e "${RED}Error: ${msg}${RESET}" >&2
-    log "ERROR: $msg"
+    msg_err "$msg"
+    local ts="[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $msg"
+    mkdir -p "$LOG_DIR"
+    echo "$ts" >> "$LOG_FILE"
     exit 1
 }
 
@@ -131,12 +146,162 @@ gloam_mktemp() {
 }
 
 cleanup() {
+    # Stop any running spinner
+    [[ -n "${_spinner_pid:-}" ]] && kill "$_spinner_pid" 2>/dev/null && wait "$_spinner_pid" 2>/dev/null || true
     for f in "${GLOAM_TMPFILES[@]}"; do
         [[ -f "$f" ]] && rm -f "$f"
     done
 }
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM
+
+# --- gum wrapper functions (themed) -----------------------------------------
+
+_gum_confirm() {
+    local rc=0
+    gum confirm \
+        --prompt.foreground "$CLR_PRIMARY" \
+        --selected.background "$CLR_PRIMARY" \
+        --unselected.foreground "$CLR_MUTED" \
+        "$@" || rc=$?
+    if [[ $rc -eq 130 ]]; then exit 130; fi
+    return $rc
+}
+
+_gum_choose() {
+    local rc=0
+    gum choose \
+        --header.foreground "$CLR_PRIMARY" \
+        --cursor.foreground "$CLR_SECONDARY" \
+        --selected.foreground "$CLR_PRIMARY" \
+        "$@" || rc=$?
+    if [[ $rc -eq 130 ]]; then exit 130; fi
+    return $rc
+}
+
+_gum_filter() {
+    local rc=0
+    gum filter \
+        --header.foreground "$CLR_PRIMARY" \
+        --indicator.foreground "$CLR_SECONDARY" \
+        --match.foreground "$CLR_ACCENT" \
+        --prompt.foreground "$CLR_PRIMARY" \
+        --cursor-text.foreground "$CLR_PRIMARY" \
+        --selected-indicator.foreground "$CLR_PRIMARY" \
+        "$@" || rc=$?
+    if [[ $rc -eq 130 ]]; then exit 130; fi
+    return $rc
+}
+
+_gum_input() {
+    local rc=0
+    gum input \
+        --header.foreground "$CLR_PRIMARY" \
+        --cursor.foreground "$CLR_SECONDARY" \
+        --prompt.foreground "$CLR_PRIMARY" \
+        --placeholder.foreground "$CLR_MUTED" \
+        "$@" || rc=$?
+    if [[ $rc -eq 130 ]]; then exit 130; fi
+    return $rc
+}
+
+_gum_spin() {
+    gum spin \
+        --spinner dot \
+        --spinner.foreground "$CLR_PRIMARY" \
+        "$@"
+}
+
+# Start/stop a background spinner for long-running inline operations.
+# Usage: _spinner_start "Loading..."; do_work; _spinner_stop
+# Works with bash functions that modify variables (no subshell).
+_spinner_pid=""
+_spinner_start() {
+    local title="$1"
+    _spinner_title="$title"
+    (
+        set +e
+        local frames=('⠋' '⠙' '⠹' '⠸' '⠼' '⠴' '⠦' '⠧' '⠇' '⠏')
+        local i=0
+        tput civis 2>/dev/null
+        while true; do
+            printf "\r\033[38;5;%sm%s\033[0m %s" "$CLR_PRIMARY" "${frames[i % ${#frames[@]}]}" "$title"
+            i=$(( i + 1 ))
+            sleep 0.08
+        done
+    ) &
+    _spinner_pid=$!
+}
+_spinner_stop() {
+    if [[ -n "$_spinner_pid" ]]; then
+        kill "$_spinner_pid" 2>/dev/null || true
+        wait "$_spinner_pid" 2>/dev/null || true
+        printf "\r\033[K"
+        tput cnorm 2>/dev/null
+        _spinner_pid=""
+    fi
+}
+
+_spinner_print() {
+    local msg="$1"
+    if [[ -n "$_spinner_pid" ]]; then
+        kill "$_spinner_pid" 2>/dev/null || true
+        wait "$_spinner_pid" 2>/dev/null || true
+        printf "\r\033[K"
+        echo "$msg"
+        _spinner_start "$_spinner_title"
+    else
+        echo "$msg"
+    fi
+}
+
+sudo_auth() {
+    msg_info "Waiting for sudo authentication..."
+    if sudo -v; then
+        tput cuu1 2>/dev/null
+        tput el 2>/dev/null
+        msg_ok "Sudo authenticated."
+        return 0
+    else
+        tput cuu1 2>/dev/null
+        tput el 2>/dev/null
+        msg_err "Sudo authentication failed."
+        return 1
+    fi
+}
+
+# --- Styled message helpers --------------------------------------------------
+
+msg_ok() {
+    gum style --foreground "$CLR_SUCCESS" "✓ $*"
+}
+
+msg_warn() {
+    gum style --foreground "$CLR_WARNING" "⚠ $*"
+}
+
+msg_err() {
+    gum style --foreground "$CLR_ERROR" "✗ $*" >&2
+}
+
+msg_info() {
+    gum style --foreground "$CLR_PRIMARY" "$*"
+}
+
+msg_header() {
+    echo ""
+    gum style \
+        --foreground "$CLR_PRIMARY" \
+        --bold \
+        --border normal \
+        --border-foreground "$CLR_PRIMARY" \
+        --padding "0 2" \
+        "$*"
+}
+
+msg_muted() {
+    gum style --foreground "$CLR_MUTED" "$@"
+}
 
 # Base paths (may be overridden by global install)
 KVANTUM_DIR="${HOME}/.config/Kvantum"
@@ -195,7 +360,7 @@ has_any_config() {
 }
 
 status_check() {
-    local label="$1" global="$2" local="$3" test_op="$4" extra="${5:-installed}"
+    local label="$1" global="$2" local="$3" test_op="$4" extra="${5:-Installed}"
     local global_ok=false local_ok=false
     case "$test_op" in
         -f) [[ -f "$global" ]] && global_ok=true; [[ -f "$local" ]] && local_ok=true ;;
@@ -203,11 +368,11 @@ status_check() {
         -x) [[ -x "$global" ]] && global_ok=true; [[ -x "$local" ]] && local_ok=true ;;
     esac
     if [[ "$global_ok" == true ]]; then
-        echo -e "    ${label}: ${GREEN}${extra} (global)${RESET}"
+        echo "  $(gum style --foreground "$CLR_SUCCESS" "✓") ${label}: $(gum style --foreground "$CLR_SUCCESS" "${extra} (Global)")"
     elif [[ "$local_ok" == true ]]; then
-        echo -e "    ${label}: ${GREEN}${extra} (local)${RESET}"
+        echo "  $(gum style --foreground "$CLR_SUCCESS" "✓") ${label}: $(gum style --foreground "$CLR_SUCCESS" "${extra} (Local)")"
     else
-        echo -e "    ${label}: ${YELLOW}not installed${RESET}"
+        echo "  $(gum style --foreground "$CLR_WARNING" "○") ${label}: $(gum style --foreground "$CLR_MUTED" "Not installed")"
     fi
 }
 
@@ -268,7 +433,7 @@ check_for_updates() {
 
     local response
     response=$(curl -fsSL --max-time 3 "$api_url" 2>/dev/null) || {
-        [[ "$verbose" == "verbose" ]] && echo "Could not check for updates (network error or no releases found)."
+        [[ "$verbose" == "verbose" ]] && msg_muted "Could not check for updates (network error or no releases found)."
         return 1
     }
 
@@ -282,16 +447,21 @@ check_for_updates() {
     local newest
     newest=$(printf '%s\n%s\n' "$GLOAM_VERSION" "$remote_version" | sort -V | tail -n1)
     if [[ "$newest" == "$GLOAM_VERSION" ]]; then
-        [[ "$verbose" == "verbose" ]] && echo "Already up to date (v${GLOAM_VERSION})."
+        [[ "$verbose" == "verbose" ]] && msg_ok "Already up to date (v${GLOAM_VERSION})."
         return 1
     fi
 
-    echo -e "${BLUE}Update available:${RESET} v${GLOAM_VERSION} → v${remote_version}"
+    gum style \
+        --foreground "$CLR_PRIMARY" \
+        --border normal \
+        --border-foreground "$CLR_PRIMARY" \
+        --padding "0 2" \
+        "Update available: v${GLOAM_VERSION} → v${remote_version}"
 
     local tarball_url
     tarball_url=$(printf '%s' "$response" | grep '"tarball_url"' | sed 's/.*"tarball_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
     if [[ -z "$tarball_url" ]]; then
-        echo "Could not find download URL in release. Update manually from https://github.com/${GLOAM_REPO}/releases"
+        msg_err "Could not find download URL in release. Update manually from https://github.com/${GLOAM_REPO}/releases"
         return 1
     fi
 
@@ -299,7 +469,7 @@ check_for_updates() {
     tmp_dir=$(mktemp -d)
 
     if ! curl -fsSL --max-time 30 "$tarball_url" | tar xz -C "$tmp_dir" --strip-components=1; then
-        echo "Failed to download update."
+        msg_err "Failed to download update."
         rm -rf "$tmp_dir"
         return 1
     fi
@@ -324,18 +494,17 @@ check_for_updates() {
 
     rm -rf "$tmp_dir"
 
-    echo -e "${GREEN}Updated to v${remote_version}.${RESET}"
+    msg_ok "Updated to v${remote_version}"
     return 0
 }
 
 do_update() {
     if [[ ! -f "/usr/local/bin/gloam" ]]; then
-        echo -e "${YELLOW}gloam is not installed globally.${RESET}"
-        read -rp "Would you like to install globally? [y/N]: " choice
-        if [[ "$choice" =~ ^[Yy]$ ]]; then
+        msg_warn "gloam is not installed globally."
+        if _gum_confirm "Would you like to install globally?"; then
             INSTALL_GLOBAL=true
         else
-            echo "Run 'gloam configure' to update a local installation."
+            msg_muted "Run 'gloam configure' to update a local installation."
             return 0
         fi
     else
@@ -354,14 +523,18 @@ check_existing_global_install() {
     admin_user=$(grep "^user=" "$GLOBAL_INSTALL_MARKER" 2>/dev/null | cut -d= -f2)
     admin_date=$(grep "^date=" "$GLOBAL_INSTALL_MARKER" 2>/dev/null | cut -d= -f2)
 
-    echo ""
-    echo -e "${YELLOW}Warning: Global installation already exists.${RESET}"
-    echo "  Configured by: ${admin_user:-unknown}"
-    echo "  Date: ${admin_date:-unknown}"
-    echo ""
-    echo "Continuing will overwrite the existing global configuration."
-    read -rp "Continue anyway? [y/N]: " choice
-    [[ "$choice" =~ ^[Yy]$ ]] && return 0
+    gum style \
+        --foreground "$CLR_WARNING" \
+        --border normal \
+        --border-foreground "$CLR_WARNING" \
+        --padding "0 2" \
+        --margin "0" \
+        "⚠ Global installation already exists" "" \
+        "  Configured by: ${admin_user:-unknown}" \
+        "  Date:          ${admin_date:-unknown}" "" \
+        "  Continuing will overwrite the existing global configuration."
+
+    _gum_confirm "Continue anyway?" && return 0
     return 1
 }
 
@@ -421,26 +594,22 @@ EOF
 
 # Global installation prompts
 ask_global_install() {
-    echo ""
-    echo -e "${BOLD}Installation Mode${RESET}"
-    echo "Local install: Components in your home directory only"
-    echo "Global install: Components available to all users (requires sudo)"
-    echo ""
+    msg_header "Installation Mode"
+    msg_muted "Local install: Components in your home directory only"
+    msg_muted "Global install: Components available to all users (requires sudo)"
 
-    read -rp "Install globally? [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo "Authenticating sudo..."
-        if ! sudo -v; then
-            echo -e "${RED}Sudo authentication failed.${RESET}"
-            read -rp "Continue with local installation? [Y/n]: " fallback
-            [[ "$fallback" =~ ^[Nn]$ ]] && exit 1
+    if _gum_confirm "Install globally?"; then
+        if ! sudo_auth; then
+            msg_err "Sudo authentication failed."
+            if ! _gum_confirm --default=yes "Continue with local installation?"; then
+                exit 1
+            fi
             return
         fi
-        echo -e "${GREEN}Sudo authenticated.${RESET}"
 
         # Check for existing global installation
         if ! check_existing_global_install; then
-            echo "Falling back to local installation."
+            msg_muted "Falling back to local installation."
             return
         fi
 
@@ -461,27 +630,25 @@ ask_apply_to_users() {
     local has_other_users=false
     [[ ${#users[@]} -gt 0 ]] && has_other_users=true
 
-    echo ""
-    echo -e "${BOLD}Apply to Other Users${RESET}"
-    echo "Your configuration can be applied to other users on this system."
-    echo ""
+    msg_header "Apply to Other Users"
+    msg_muted "Your configuration can be applied to other users on this system."
 
     if [[ "$has_other_users" == true ]]; then
-        echo "  1) Existing users only"
-        echo "  2) New users only (set as system defaults)"
-        echo "  3) Both existing and new users"
-        echo "  4) Neither"
-        echo ""
-        read -rp "Apply settings to other users? [1-4] (default: 4): " choice
+        local choice
+        choice=$(_gum_choose --header "Apply settings to other users?" \
+            "Existing users only" \
+            "New users only (set as system defaults)" \
+            "Both existing and new users" \
+            "Neither")
         case "$choice" in
-            1)
+            "Existing users only")
                 SELECTED_USERS=("${users[@]}")
                 PUSH_TO_USERS=true
                 ;;
-            2)
+            "New users only (set as system defaults)")
                 SET_SYSTEM_DEFAULTS=true
                 ;;
-            3)
+            "Both existing and new users")
                 SELECTED_USERS=("${users[@]}")
                 PUSH_TO_USERS=true
                 SET_SYSTEM_DEFAULTS=true
@@ -491,8 +658,7 @@ ask_apply_to_users() {
                 ;;
         esac
     else
-        read -rp "Set as system defaults for new users? [y/N]: " choice
-        if [[ "$choice" =~ ^[Yy]$ ]]; then
+        if _gum_confirm "Set as system defaults for new users?"; then
             SET_SYSTEM_DEFAULTS=true
         else
             return
@@ -500,18 +666,15 @@ ask_apply_to_users() {
     fi
 
     # Ask about copying desktop settings
-    echo ""
-    echo -e "${BOLD}Copy Desktop Settings${RESET}"
-    echo "Also copy the following settings:"
-    echo "  - Panel layout, positions and widgets (plasmoids)"
-    echo "  - Mouse and touchpad settings"
-    echo "  - Window manager effects and tiling"
-    echo "  - Keyboard shortcuts"
-    echo "  - Desktop and lock screen wallpapers"
-    echo "  - App settings (Dolphin, Konsole profiles, KRunner)"
-    echo ""
-    read -rp "Copy desktop settings? [y/N]: " desktop_choice
-    [[ "$desktop_choice" =~ ^[Yy]$ ]] && COPY_DESKTOP_LAYOUT=true
+    msg_header "Copy Desktop Settings"
+    msg_muted "Also copy the following settings:" \
+        "  - Panel layout, positions and widgets (plasmoids)" \
+        "  - Mouse and touchpad settings" \
+        "  - Window manager effects and tiling" \
+        "  - Keyboard shortcuts" \
+        "  - Desktop and lock screen wallpapers" \
+        "  - App settings (Dolphin, Konsole profiles, KRunner)"
+    _gum_confirm "Copy desktop settings?" && COPY_DESKTOP_LAYOUT=true
 }
 
 install_icons_system_wide() {
@@ -586,9 +749,6 @@ push_config_to_users() {
     [[ "$PUSH_TO_USERS" != true ]] && return
     [[ ${#SELECTED_USERS[@]} -eq 0 ]] && return
 
-    echo ""
-    echo "Pushing configuration to selected users..."
-
     local service_file
     service_file="$(get_service_file)"
 
@@ -598,8 +758,6 @@ push_config_to_users() {
         local target_config="${homedir}/.config/gloam.conf"
         local target_service_dir="${homedir}/.config/systemd/user"
         local target_service="${target_service_dir}/${SERVICE_NAME}.service"
-
-        echo "  Configuring $username..."
 
         # Ensure .config directory exists
         sudo mkdir -p "${homedir}/.config"
@@ -694,8 +852,8 @@ push_config_to_users() {
         sudo -u "$username" systemctl --user daemon-reload 2>/dev/null || log "WARN: Failed to daemon-reload for user: $username (not logged in?)"
         sudo -u "$username" systemctl --user enable "$SERVICE_NAME" 2>/dev/null || log "WARN: Failed to enable service for user: $username (not logged in?)"
 
-        echo -e "    ${GREEN}Done${RESET}"
     done
+    msg_ok "Pushed configuration to selected users"
 
     install_bundled_assets_system_wide
 
@@ -716,8 +874,7 @@ push_config_to_users() {
 set_system_defaults() {
     [[ "$SET_SYSTEM_DEFAULTS" != true ]] && return
 
-    echo ""
-    echo "Setting system defaults for new users..."
+    msg_info "Setting system defaults for new users..."
 
     # Set default light/dark themes in /etc/xdg/kdeglobals
     local xdg_globals="/etc/xdg/kdeglobals"
@@ -797,12 +954,13 @@ set_system_defaults() {
     # Set keyboard shortcut in /etc/xdg/kglobalshortcutsrc
     sudo kwriteconfig6 --file /etc/xdg/kglobalshortcutsrc --group "services" --group "$SHORTCUT_ID" --key "_launch" "Meta+Shift+L"
 
-    echo -e "${GREEN}System defaults configured for new users.${RESET}"
+    msg_ok "System defaults configured for new users."
 }
 
 read_json_name() {
     local file="$1"
-    sed -n 's/.*"Name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" 2>/dev/null | head -1
+    # Extract the KPlugin "Name" — use tail -1 because Authors "Name" entries come first
+    sed -n 's/.*"Name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$file" 2>/dev/null | tail -1
 }
 
 get_friendly_name() {
@@ -859,8 +1017,9 @@ get_friendly_name() {
 }
 
 show_laf_reminder() {
-    echo -e "${YELLOW}Reminder:${RESET} Make sure your Light and Dark themes are set to your preferred themes."
-    echo "You can set them in: System Settings > Quick Settings"
+    msg_header "Global Themes"
+    msg_warn "Make sure your Light and Dark themes are set to your preferred themes."
+    msg_muted "You can set them in: System Settings > Quick Settings"
 }
 
 # --- THEME SCANNING -----------------------------------------------------------
@@ -980,13 +1139,9 @@ scan_app_styles() {
 
 select_themes() {
     local prompt_msg="$1" scan_cmd="$2" var_prefix="$3" opts="${4:-}" callback="${5:-}"
-    
-    echo ""
-    local choice
-    read -rp "$prompt_msg [y/N]: " choice
-    [[ "$choice" =~ ^[Yy]$ ]] || return 1
-    
-    echo "Scanning..."
+
+    _gum_confirm "$prompt_msg" || return 1
+
     local items=() ids=()
     if [[ "$opts" == *"id_name"* ]]; then
         while IFS='|' read -r id name; do
@@ -998,42 +1153,56 @@ select_themes() {
         mapfile -t items < <($scan_cmd)
         ids=("${items[@]}")
     fi
-    
+
     if [[ ${#items[@]} -eq 0 ]]; then
-        echo "None found, skipping."
+        msg_muted "None found, skipping."
         return 1
     fi
-    
-    echo ""
-    echo -e "${BOLD}Available:${RESET}"
-    [[ "$opts" == *"has_none"* ]] && printf "  ${BLUE}%3d)${RESET} %s\n" "0" "None (Disable)"
-    for i in "${!items[@]}"; do
-        printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${items[$i]}"
-    done
-    
-    local light_val dark_val
-    echo ""
-    read -rp "Select ☀️ LIGHT mode [0-${#items[@]}]: " choice
-    if [[ "$choice" == "0" && "$opts" == *"has_none"* ]]; then
-        light_val="None"
-    elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#items[@]} )); then
-        light_val="${ids[$((choice - 1))]}"
-    else
-        return 1
-    fi
-    
-    read -rp "Select 🌙 DARK mode [0-${#items[@]}]: " choice
-    if [[ "$choice" == "0" && "$opts" == *"has_none"* ]]; then
-        dark_val="None"
-    elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#items[@]} )); then
-        dark_val="${ids[$((choice - 1))]}"
-    else
-        return 1
-    fi
-    
+
+    # Build display list, optionally with "None (Disable)" option
+    local display_items=()
+    [[ "$opts" == *"has_none"* ]] && display_items+=("None (Disable)")
+    display_items+=("${items[@]}")
+
+    # Use gum filter for long lists, gum choose for short ones
+    local _gum_select=_gum_choose
+    (( ${#display_items[@]} > 10 )) && _gum_select=_gum_filter
+
+    local light_choice dark_choice light_val dark_val
+    light_choice=$(printf '%s\n' "${display_items[@]}" | "$_gum_select" --header "Select ☀️ LIGHT mode") || return 1
+    dark_choice=$(printf '%s\n' "${display_items[@]}" | "$_gum_select" --header "Select 🌙 DARK mode") || return 1
+
+    # Map display name back to id
+    _resolve_id() {
+        local selected="$1"
+        if [[ "$selected" == "None (Disable)" ]]; then
+            echo "None"
+            return
+        fi
+        for i in "${!items[@]}"; do
+            if [[ "${items[$i]}" == "$selected" ]]; then
+                echo "${ids[$i]}"
+                return
+            fi
+        done
+        echo "$selected"
+    }
+
+    light_val=$(_resolve_id "$light_choice")
+    dark_val=$(_resolve_id "$dark_choice")
+
+    # Extract label from prompt (between "Configure " and "?")
+    local label
+    label=$(echo "$prompt_msg" | sed -n 's/Configure \([^?]*\)?.*/\1/p')
+    [[ -n "$label" ]] && label="${label^}" || label="Selection"
+    msg_muted "$label"
+    echo "  ☀️ $(gum style --bold --foreground "$CLR_PRIMARY" "$light_choice")"
+    echo "  🌙 $(gum style --bold --foreground "$CLR_PRIMARY" "$dark_choice")"
+
     printf -v "${var_prefix}_LIGHT" '%s' "$light_val"
     printf -v "${var_prefix}_DARK" '%s' "$dark_val"
     [[ -n "$callback" ]] && $callback
+    echo ""
     return 0
 }
 
@@ -1153,7 +1322,7 @@ METADATA
         echo "$metadata" > "${wallpaper_dir}/metadata.json"
     fi
 
-    echo -e "  ${GREEN}Created:${RESET} ${display_name} — ${wallpaper_dir}/"
+    _spinner_print "$(msg_ok "Created: ${display_name} — ${wallpaper_dir}/")"
 }
 
 scan_color_schemes() {
@@ -1193,7 +1362,7 @@ install_plasmoid() {
     local plasmoid_src="${script_dir}/plasmoid"
 
     if [[ ! -d "$plasmoid_src" ]]; then
-        echo -e "${RED}Error: Plasmoid source not found at $plasmoid_src${RESET}" >&2
+        msg_err "Plasmoid source not found at $plasmoid_src"
         return 1
     fi
 
@@ -1207,23 +1376,26 @@ install_plasmoid() {
         gloam_cmd kpackagetool6 "${kp_args[@]}" --install "$plasmoid_src" >/dev/null 2>&1
     fi
 
-    echo -e "${GREEN}Installed Light/Dark Mode Toggle widget.${RESET}"
-    echo "You can add it to your panel by right-clicking the panel > Add Widgets > Light/Dark Mode Toggle"
+    msg_ok "Installed Light/Dark Mode Toggle widget."
+    msg_muted "You can add it to your panel by right-clicking the panel > Add Widgets > Light/Dark Mode Toggle"
 }
 
 remove_plasmoid() {
     local kp_args=(-t Plasma/Applet)
+    local removed=false
 
     # Try removing local install
     if kpackagetool6 "${kp_args[@]}" --show "$PLASMOID_ID" &>/dev/null; then
-        kpackagetool6 "${kp_args[@]}" --remove "$PLASMOID_ID" 2>/dev/null && echo "Removed plasmoid (local)"
+        kpackagetool6 "${kp_args[@]}" --remove "$PLASMOID_ID" &>/dev/null
+        removed=true
     fi
 
     # Try removing global install
     if kpackagetool6 "${kp_args[@]}" --global --show "$PLASMOID_ID" &>/dev/null; then
-        sudo kpackagetool6 "${kp_args[@]}" --global --remove "$PLASMOID_ID" 2>/dev/null && echo "Removed plasmoid (global)"
+        sudo kpackagetool6 "${kp_args[@]}" --global --remove "$PLASMOID_ID" &>/dev/null
+        removed=true
     fi
-    return 0
+    [[ "$removed" == true ]]
 }
 
 install_shortcut() {
@@ -1248,25 +1420,24 @@ X-KDE-GlobalAccel-CommandShortcut=true"
     # Register the shortcut with KDE (Meta+Shift+L) - always per-user
     kwriteconfig6 --file kglobalshortcutsrc --group "services" --group "$SHORTCUT_ID" --key "_launch" "Meta+Shift+L"
 
-    echo -e "${GREEN}Keyboard shortcut installed: Meta+Shift+L${RESET}"
-    echo "You can change it in System Settings > Shortcuts > Commands"
-    echo -e "${YELLOW}Note:${RESET} You may need to log out and back in for the shortcut to take effect."
+    msg_ok "Keyboard shortcut installed: Meta+Shift+L"
+    msg_muted "You can change it in System Settings > Shortcuts > Commands"
+    msg_warn "You may need to log out and back in for the shortcut to take effect."
 }
 
 remove_shortcut() {
     local local_file="${HOME}/.local/share/applications/gloam-toggle.desktop"
     local global_file="/usr/share/applications/gloam-toggle.desktop"
-    local had_shortcut=false
+    local removed=false
 
-    [[ -f "$local_file" ]] && rm -f "$local_file" && echo "Removed $local_file" && had_shortcut=true
-    [[ -f "$global_file" ]] && sudo rm -f "$global_file" && echo "Removed $global_file" && had_shortcut=true
+    [[ -f "$local_file" ]] && { rm -f "$local_file"; removed=true; }
+    [[ -f "$global_file" ]] && { sudo rm -f "$global_file"; removed=true; }
 
     # Remove from kglobalshortcutsrc (per-user) only if we actually had the shortcut installed
-    if [[ "$had_shortcut" == true ]] && grep -q "$SHORTCUT_ID" "${HOME}/.config/kglobalshortcutsrc" 2>/dev/null; then
+    if [[ "$removed" == true ]] && grep -q "$SHORTCUT_ID" "${HOME}/.config/kglobalshortcutsrc" 2>/dev/null; then
         kwriteconfig6 --file kglobalshortcutsrc --group "services" --group "$SHORTCUT_ID" --key "_launch" --delete
-        echo "Removed keyboard shortcut binding"
     fi
-    return 0
+    [[ "$removed" == true ]]
 }
 
 # --- SYSTEMD & SERVICE --------------------------------------------------------
@@ -1287,8 +1458,6 @@ cleanup_stale() {
     [[ -f "$CONFIG_FILE" ]] && rm "$CONFIG_FILE" && dirty=1
     if [[ "$dirty" -eq 1 ]]; then
         systemctl --user daemon-reload
-        echo ""
-        echo -e "${GREEN}Cleaned up previous installation.${RESET}"
     fi
 }
 
@@ -1319,6 +1488,8 @@ get_pkg_name() {
     case "$pkg" in
         inotify-tools)
             echo "inotify-tools" ;;
+        gum)
+            echo "gum" ;;
         *)
             echo "$pkg" ;;
     esac
@@ -1349,7 +1520,7 @@ check_dependencies() {
 
     # Non-KDE dependencies — offer to install
     # Format: "command:package-name"
-    local deps=("inotifywait:inotify-tools")
+    local deps=("inotifywait:inotify-tools" "gum:gum")
     local missing_cmds=()
     local missing_pkgs=()
 
@@ -1364,17 +1535,16 @@ check_dependencies() {
 
     [[ ${#missing_pkgs[@]} -eq 0 ]] && return 0
 
-    echo -e "${YELLOW}Missing dependencies:${RESET}"
+    gum style --foreground "$CLR_WARNING" --bold "Missing dependencies:"
     for i in "${!missing_cmds[@]}"; do
-        echo "  - ${missing_cmds[$i]} (${missing_pkgs[$i]})"
+        echo "  $(gum style --foreground "$CLR_WARNING" "•") ${missing_cmds[$i]} (${missing_pkgs[$i]})"
     done
-    echo ""
 
     local mgr
     mgr=$(detect_pkg_manager)
 
     if [[ -z "$mgr" ]]; then
-        die "Could not detect a supported package manager.\nPlease install manually: ${missing_pkgs[*]}"
+        die "Could not detect a supported package manager. Please install manually: ${missing_pkgs[*]}"
     fi
 
     # Resolve distro-specific package names
@@ -1383,16 +1553,12 @@ check_dependencies() {
         resolved_pkgs+=("$(get_pkg_name "$pkg" "$mgr")")
     done
 
-    read -rp "Install with $mgr? [Y/n]: " choice
-    if [[ "$choice" =~ ^[Nn]$ ]]; then
+    if ! _gum_confirm --default=yes "Install with $mgr?"; then
         die "Missing dependencies: ${missing_pkgs[*]}"
     fi
 
-    echo ""
     install_packages "$mgr" "${resolved_pkgs[@]}" || die "Failed to install dependencies."
-    echo ""
-    echo -e "${GREEN}Dependencies installed.${RESET}"
-    echo ""
+    msg_ok "Dependencies installed."
 }
 
 get_laf() {
@@ -1852,8 +2018,7 @@ generate_custom_theme() {
     done
 
     if [[ -z "$base_theme_dir" ]]; then
-        echo -e "  ${RED}Error: Base theme not found: ${base_theme}${RESET}" >&2
-        return 1
+        die "Base theme not found: ${base_theme}"
     fi
 
     # Remove existing custom theme and copy base theme
@@ -2041,7 +2206,7 @@ METADATA
         fi
     fi
 
-    echo -e "  ${GREEN}Created:${RESET} ${theme_name} (based on $(basename "$base_theme_dir"))"
+    _spinner_print "$(msg_ok "Created: ${theme_name} (based on $(basename "$base_theme_dir"))")"
 }
 
 # Bundle wallpapers and SDDM backgrounds into the custom theme directory
@@ -2111,24 +2276,26 @@ bundle_wallpapers_and_sddm() {
 
 # Remove custom themes on uninstall
 remove_custom_themes() {
+    local removed=false
     for theme in org.kde.custom.light org.kde.custom.dark; do
         local local_path="${HOME}/.local/share/plasma/look-and-feel/${theme}"
         local global_path="/usr/share/plasma/look-and-feel/${theme}"
 
-        [[ -d "$local_path" ]] && rm -rf "$local_path" && echo "Removed $local_path"
-        [[ -d "$global_path" ]] && sudo rm -rf "$global_path" && echo "Removed $global_path"
+        [[ -d "$local_path" ]] && { rm -rf "$local_path"; removed=true; }
+        [[ -d "$global_path" ]] && { sudo rm -rf "$global_path"; removed=true; }
     done
-    return 0
+    [[ "$removed" == true ]]
 }
 
 remove_wallpaper_packs() {
+    local removed=false
     for pack in gloam; do
         local local_path="${HOME}/.local/share/wallpapers/${pack}"
         local global_path="/usr/share/wallpapers/${pack}"
-        [[ -d "$local_path" ]] && rm -rf "$local_path" && echo "Removed $local_path"
-        [[ -d "$global_path" ]] && sudo rm -rf "$global_path" && echo "Removed $global_path"
+        [[ -d "$local_path" ]] && { rm -rf "$local_path"; removed=true; }
+        [[ -d "$global_path" ]] && { sudo rm -rf "$global_path"; removed=true; }
     done
-    return 0
+    [[ "$removed" == true ]]
 }
 
 apply_theme() {
@@ -2334,7 +2501,7 @@ do_switch() {
     local friendly_name
     friendly_name=$(get_friendly_name laf "$laf")
     echo -e "Switching to ${icon} ${label} theme: ${BOLD}$friendly_name${RESET}"
-    plasma-apply-lookandfeel -a "$laf"
+    plasma-apply-lookandfeel -a "$laf" 2>/dev/null
 
     # Restore auto mode if it was enabled
     if [[ "$auto_mode" == "true" ]]; then
@@ -2375,38 +2542,41 @@ clean_app_overrides() {
 print_config_summary() {
     local laf_light_val="$1" laf_dark_val="$2" show_ids="${3:-false}"
     local light_suffix="" dark_suffix=""
+    local em_dash
+    em_dash=$(gum style --foreground "$CLR_MUTED" "—")
     if [[ "$show_ids" == true ]]; then
         light_suffix=" ($laf_light_val)"
         dark_suffix=" ($laf_dark_val)"
     fi
-    echo -e "☀️ Light theme: ${BOLD}$(get_friendly_name laf "$laf_light_val")${RESET}${light_suffix}"
-    echo "    Colors: ${COLOR_LIGHT:-unset}"
-    echo "    Kvantum: ${KVANTUM_LIGHT:-unset}"
-    echo "    App style: ${APPSTYLE_LIGHT:-unset}"
-    echo "    GTK: ${GTK_LIGHT:-unset}"
-    echo "    Style: ${STYLE_LIGHT:-unset}"
-    echo "    Decorations: $([[ -n "${DECORATION_LIGHT:-}" ]] && get_friendly_name decoration "$DECORATION_LIGHT" || echo "unchanged")"
-    echo "    Icons: ${ICON_LIGHT:-unset}"
-    echo "    Cursors: ${CURSOR_LIGHT:-unset}"
-    echo "    Splash: $(get_friendly_name splash "${SPLASH_LIGHT:-}")"
-    echo "    Login: $(get_friendly_name sddm "${SDDM_LIGHT:-}")"
-    echo "    Wallpaper: ${WALLPAPER:+Custom (Dynamic, Light, Dark)}"
-    echo "    Konsole: ${KONSOLE_LIGHT:-unset}"
-    echo "    Script: ${SCRIPT_LIGHT:-unset}"
-    echo -e "🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark_val")${RESET}${dark_suffix}"
-    echo "    Colors: ${COLOR_DARK:-unset}"
-    echo "    Kvantum: ${KVANTUM_DARK:-unset}"
-    echo "    App style: ${APPSTYLE_DARK:-unset}"
-    echo "    GTK: ${GTK_DARK:-unset}"
-    echo "    Style: ${STYLE_DARK:-unset}"
-    echo "    Decorations: $([[ -n "${DECORATION_DARK:-}" ]] && get_friendly_name decoration "$DECORATION_DARK" || echo "unchanged")"
-    echo "    Icons: ${ICON_DARK:-unset}"
-    echo "    Cursors: ${CURSOR_DARK:-unset}"
-    echo "    Splash: $(get_friendly_name splash "${SPLASH_DARK:-}")"
-    echo "    Login: $(get_friendly_name sddm "${SDDM_DARK:-}")"
-    echo "    Wallpaper: ${WALLPAPER:+Custom (Dynamic, Light, Dark)}"
-    echo "    Konsole: ${KONSOLE_DARK:-unset}"
-    echo "    Script: ${SCRIPT_DARK:-unset}"
+    _cfg_val() { [[ -n "${1:-}" ]] && echo "$1" || echo "$em_dash"; }
+    echo "  ☀️ $(gum style --bold --foreground "$CLR_PRIMARY" "$(get_friendly_name laf "$laf_light_val")")${light_suffix}"
+    echo "    Colors: $(_cfg_val "${COLOR_LIGHT:-}")"
+    echo "    Kvantum: $(_cfg_val "${KVANTUM_LIGHT:-}")"
+    echo "    App style: $(_cfg_val "${APPSTYLE_LIGHT:-}")"
+    echo "    GTK: $(_cfg_val "${GTK_LIGHT:-}")"
+    echo "    Style: $(_cfg_val "${STYLE_LIGHT:-}")"
+    echo "    Decorations: $(_cfg_val "$([[ -n "${DECORATION_LIGHT:-}" ]] && get_friendly_name decoration "$DECORATION_LIGHT")")"
+    echo "    Icons: $(_cfg_val "${ICON_LIGHT:-}")"
+    echo "    Cursors: $(_cfg_val "${CURSOR_LIGHT:-}")"
+    echo "    Splash: $(_cfg_val "$([[ -n "${SPLASH_LIGHT:-}" ]] && get_friendly_name splash "${SPLASH_LIGHT}")")"
+    echo "    Login: $(_cfg_val "$([[ -n "${SDDM_LIGHT:-}" ]] && get_friendly_name sddm "${SDDM_LIGHT}")")"
+    echo "    Wallpaper: $([[ -n "${WALLPAPER:-}" ]] && echo "Custom (Dynamic, Light, Dark)" || echo "$em_dash")"
+    echo "    Konsole: $(_cfg_val "${KONSOLE_LIGHT:-}")"
+    echo "    Script: $(_cfg_val "${SCRIPT_LIGHT:-}")"
+    echo "  🌙 $(gum style --bold --foreground "$CLR_PRIMARY" "$(get_friendly_name laf "$laf_dark_val")")${dark_suffix}"
+    echo "    Colors: $(_cfg_val "${COLOR_DARK:-}")"
+    echo "    Kvantum: $(_cfg_val "${KVANTUM_DARK:-}")"
+    echo "    App style: $(_cfg_val "${APPSTYLE_DARK:-}")"
+    echo "    GTK: $(_cfg_val "${GTK_DARK:-}")"
+    echo "    Style: $(_cfg_val "${STYLE_DARK:-}")"
+    echo "    Decorations: $(_cfg_val "$([[ -n "${DECORATION_DARK:-}" ]] && get_friendly_name decoration "$DECORATION_DARK")")"
+    echo "    Icons: $(_cfg_val "${ICON_DARK:-}")"
+    echo "    Cursors: $(_cfg_val "${CURSOR_DARK:-}")"
+    echo "    Splash: $(_cfg_val "$([[ -n "${SPLASH_DARK:-}" ]] && get_friendly_name splash "${SPLASH_DARK}")")"
+    echo "    Login: $(_cfg_val "$([[ -n "${SDDM_DARK:-}" ]] && get_friendly_name sddm "${SDDM_DARK}")")"
+    echo "    Wallpaper: $([[ -n "${WALLPAPER:-}" ]] && echo "Custom (Dynamic, Light, Dark)" || echo "$em_dash")"
+    echo "    Konsole: $(_cfg_val "${KONSOLE_DARK:-}")"
+    echo "    Script: $(_cfg_val "${SCRIPT_DARK:-}")"
 }
 
 do_configure() {
@@ -2441,6 +2611,8 @@ do_configure() {
     local configure_appstyle=false
     local configure_wallpaper=false
     local IMPORT_CONFIG=""
+    local IMPORT_REQUESTED=false
+    local EXPORT_REQUESTED=false
     local EXPORT_DIR=""
 
     while [[ $# -gt 0 ]]; do
@@ -2460,12 +2632,12 @@ do_configure() {
             -C|--cursors)       configure_cursors=true; configure_all=false ;;
             -w|--widget)        configure_widget=true; configure_all=false ;;
             -K|--shortcut)      configure_shortcut=true; configure_all=false ;;
-            -I|--import)        shift; IMPORT_CONFIG="$1" ;;
-            -e|--export)        shift; EXPORT_DIR="$1" ;;
+            -I|--import)        if [[ $# -gt 1 && ! "$2" =~ ^- ]]; then IMPORT_CONFIG="$2"; shift; fi; IMPORT_REQUESTED=true ;;
+            -e|--export)        EXPORT_REQUESTED=true ;;
             help|-h|--help)     show_configure_help; exit 0 ;;
             *)
-                echo "Unknown option: $1" >&2
-                echo "Options: -c|--colors -k|--kvantum -a|--appstyle -g|--gtk -p|--style -d|--decorations -i|--icons -C|--cursors -S|--splash -l|--login -W|--wallpaper -o|--konsole -s|--script -w|--widget -K|--shortcut -I|--import <file> -e|--export <dir>" >&2
+                msg_err "Unknown option: $1"
+                msg_muted "Options: -c|--colors -k|--kvantum -a|--appstyle -g|--gtk -p|--style -d|--decorations -i|--icons -C|--cursors -S|--splash -l|--login -W|--wallpaper -o|--konsole -s|--script -w|--widget -K|--shortcut -I|--import <file> -e|--export <dir>"
                 exit 1
                 ;;
         esac
@@ -2473,38 +2645,51 @@ do_configure() {
     done
 
     # Handle --export: copy config to target directory and exit
-    if [[ -n "${EXPORT_DIR}" ]]; then
+    if [[ "$EXPORT_REQUESTED" == true ]]; then
+        if [[ -z "$EXPORT_DIR" ]]; then
+            EXPORT_DIR=$(_gum_input --header "Export directory" --placeholder "/path/to/directory" --width 60) || exit 1
+        fi
         if [[ ! -f "$CONFIG_FILE" ]]; then
-            echo -e "${RED}Error: No config found at $CONFIG_FILE. Run configure first.${RESET}"
+            msg_err "No config found at $CONFIG_FILE. Run configure first."
             exit 1
         fi
         if [[ ! -d "$EXPORT_DIR" ]]; then
-            echo -e "${RED}Error: Directory not found: $EXPORT_DIR${RESET}"
+            msg_err "Directory not found: $EXPORT_DIR"
             exit 1
         fi
         cp "$CONFIG_FILE" "${EXPORT_DIR}/gloam.conf"
-        echo -e "${GREEN}Config exported to ${EXPORT_DIR}/gloam.conf${RESET}"
+        msg_ok "Config exported to ${EXPORT_DIR}/gloam.conf"
         exit 0
+    fi
+
+    # Prompt for import path if needed, before showing disclaimer
+    if [[ "$IMPORT_REQUESTED" == true && -z "$IMPORT_CONFIG" ]]; then
+        IMPORT_CONFIG=$(_gum_input --header "Import config file" --placeholder "/path/to/gloam.conf" --width 60) || exit 1
     fi
 
     # Show disclaimer
     echo ""
-    echo -e "${YELLOW}${BOLD}Disclaimer${RESET}"
-    echo "gloam modifies Plasma theme settings, system configs, and user files."
-    echo "It is recommended to back up your system before proceeding."
-    echo "The authors are not responsible for any system issues."
-    echo ""
-    read -rp "Continue? [y/N]: " disclaimer_choice
-    [[ ! "$disclaimer_choice" =~ ^[Yy]$ ]] && { echo "Aborted."; exit 0; }
+    gum style \
+        --foreground "$CLR_WARNING" \
+        --border double \
+        --border-foreground "$CLR_WARNING" \
+        --padding "1 2" \
+        --margin "0" \
+        --bold \
+        "Disclaimer" "" \
+        "gloam modifies Plasma theme settings, system configs, and user files." \
+        "It is recommended to back up your system before proceeding." \
+        "The authors are not responsible for any system issues."
+
+    _gum_confirm "Continue?" || { msg_muted "Aborted."; exit 0; }
 
     # Handle config import - source the file and skip all interactive questions
     if [[ -n "${IMPORT_CONFIG}" ]]; then
         if [[ ! -f "$IMPORT_CONFIG" ]]; then
-            echo -e "${RED}Error: Config file not found: $IMPORT_CONFIG${RESET}"
-            exit 1
+            die "Config file not found: $IMPORT_CONFIG"
         fi
         echo ""
-        echo -e "${BLUE}Importing configuration from ${IMPORT_CONFIG}...${RESET}"
+        msg_info "Importing configuration from ${IMPORT_CONFIG}..."
         # shellcheck source=/dev/null
         source "$IMPORT_CONFIG"
 
@@ -2602,17 +2787,24 @@ do_configure() {
         [[ -n "${SCRIPT_DARK:-}" && ! -f "${SCRIPT_DARK}" ]] && import_errors+=("Dark script not found: $SCRIPT_DARK")
 
         if [[ ${#import_errors[@]} -gt 0 ]]; then
-            echo -e "${RED}Import failed — missing assets:${RESET}"
+            local error_list=""
             for err in "${import_errors[@]}"; do
-                echo -e "  ${RED}- ${err}${RESET}"
+                error_list+="  • ${err}"$'\n'
             done
+            gum style \
+                --foreground "$CLR_ERROR" \
+                --border normal \
+                --border-foreground "$CLR_ERROR" \
+                --padding "0 2" \
+                "Import failed — missing assets:" "" \
+                "$error_list"
             exit 1
         fi
 
         # Authenticate sudo if config requires global installation
         if [[ "${INSTALL_GLOBAL:-false}" == true ]]; then
-            echo "Config requires global installation, requesting sudo..."
-            sudo -v || { echo -e "${RED}Sudo required for global installation.${RESET}"; exit 1; }
+            msg_info "Config requires global installation, requesting sudo..."
+            sudo_auth || { msg_err "Sudo required for global installation."; exit 1; }
         fi
         # Auto-discover push targets if push was enabled
         if [[ "${PUSH_TO_USERS:-false}" == true ]]; then
@@ -2631,12 +2823,11 @@ do_configure() {
             laf_dark="${LAF_DARK:-}"
         fi
         if [[ -z "$laf_light" || -z "$laf_dark" ]]; then
-            echo -e "${RED}Error: Imported config is missing theme definitions.${RESET}"
-            exit 1
+            die "Imported config is missing theme definitions."
         fi
-        echo ""
-        echo -e "☀️ Light theme: ${BOLD}$(get_friendly_name laf "$laf_light")${RESET}"
-        echo -e "🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark")${RESET}"
+        msg_header "Global Themes"
+        echo "  ☀️ $(gum style --bold --foreground "$CLR_PRIMARY" "$(get_friendly_name laf "$laf_light")")"
+        echo "  🌙 $(gum style --bold --foreground "$CLR_PRIMARY" "$(get_friendly_name laf "$laf_dark")")"
         cleanup_stale
         # Remove app-specific overrides so they follow the global theme
         clean_app_overrides
@@ -2649,22 +2840,21 @@ do_configure() {
         source "$CONFIG_FILE"
         # Authenticate sudo if this is a global installation
         if [[ "$INSTALL_GLOBAL" == true ]]; then
-            echo "Global installation detected, requesting sudo..."
-            sudo -v || { echo -e "${RED}Sudo required for global installation.${RESET}"; exit 1; }
+            msg_info "Global installation detected, requesting sudo..."
+            sudo_auth || { msg_err "Sudo required for global installation."; exit 1; }
         fi
     elif [[ "$configure_all" == true ]]; then
         # Full configuration - ask about global installation first
         ask_global_install
 
         if [[ -f "$CONFIG_FILE" ]]; then
-            echo -e "${YELLOW}Existing configuration found.${RESET}"
-            read -rp "Do you want to overwrite it? [y/N]: " choice
-            if [[ "$choice" =~ ^[Yy]$ ]]; then
+            msg_warn "Existing configuration found."
+            if _gum_confirm "Do you want to overwrite it?"; then
                 source "$CONFIG_FILE"
                 cleanup_stale
             else
-                echo "Use configure options to modify specific settings (e.g. --kvantum, --gtk)."
-                echo "Run 'gloam help' for available options."
+                msg_muted "Use configure options to modify specific settings (e.g. --kvantum, --gtk)."
+                msg_muted "Run 'gloam help' for available options."
                 exit 0
             fi
         else
@@ -2678,41 +2868,64 @@ do_configure() {
 
     # Remove app-specific overrides so they follow the global theme
     clean_app_overrides
-    echo ""
 
     # Read light/dark themes from KDE Quick Settings configuration
-    echo -e "${BLUE}Reading theme configuration from KDE settings...${RESET}"
+    msg_info "Reading theme configuration from KDE settings..."
     local laf_light laf_dark
     laf_light=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel)
     laf_dark=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel)
 
     # If KDE still points to our custom themes, resolve back to the base themes
+    # Try config variable first, then fall back to reading the custom theme's metadata
+    _resolve_base_theme() {
+        local custom_id="$1" mode="$2" config_var="$3"
+        # Config variable available
+        [[ -n "${!config_var:-}" ]] && echo "${!config_var}" && return 0
+        # Extract from custom theme metadata ("Custom light theme based on <id>")
+        local meta_file
+        for dir in /usr/share/plasma/look-and-feel "${HOME}/.local/share/plasma/look-and-feel"; do
+            meta_file="${dir}/${custom_id}/metadata.json"
+            if [[ -f "$meta_file" ]]; then
+                local base_id
+                base_id=$(sed -n "s/.*\"Description\"[[:space:]]*:[[:space:]]*\"Custom ${mode} theme based on \([^\"]*\)\".*/\1/p" "$meta_file")
+                [[ -n "$base_id" ]] && echo "$base_id" && return 0
+            fi
+        done
+        return 1
+    }
+
     if [[ "$laf_light" == "org.kde.custom.light" ]]; then
-        if [[ -n "${BASE_THEME_LIGHT:-}" ]]; then
-            laf_light="$BASE_THEME_LIGHT"
+        local resolved
+        if resolved=$(_resolve_base_theme "org.kde.custom.light" "light" "BASE_THEME_LIGHT"); then
+            laf_light="$resolved"
+            BASE_THEME_LIGHT="$resolved"
         else
-            echo -e "${RED}Error: KDE is set to use Custom (Light) but the base theme is unknown.${RESET}" >&2
-            echo "Please make sure light and dark themes are set in System Settings > Quick Settings" >&2
+            msg_err "KDE is set to use Custom (Light) but the base theme is unknown."
+            msg_muted "Please set your light theme in System Settings > Quick Settings"
             exit 1
         fi
     fi
     if [[ "$laf_dark" == "org.kde.custom.dark" ]]; then
-        if [[ -n "${BASE_THEME_DARK:-}" ]]; then
-            laf_dark="$BASE_THEME_DARK"
+        local resolved
+        if resolved=$(_resolve_base_theme "org.kde.custom.dark" "dark" "BASE_THEME_DARK"); then
+            laf_dark="$resolved"
+            BASE_THEME_DARK="$resolved"
         else
-            echo -e "${RED}Error: KDE is set to use Custom (Dark) but the base theme is unknown.${RESET}" >&2
-            echo "Please make sure light and dark themes are set in System Settings > Quick Settings" >&2
+            msg_err "KDE is set to use Custom (Dark) but the base theme is unknown."
+            msg_muted "Please set your dark theme in System Settings > Quick Settings"
             exit 1
         fi
     fi
-    echo -e "☀️ Light theme: ${BOLD}$(get_friendly_name laf "$laf_light")${RESET}"
-    echo -e "🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark")${RESET}"
+    echo "  ☀️ $(gum style --bold --foreground "$CLR_PRIMARY" "$(get_friendly_name laf "$laf_light")")"
+    echo "  🌙 $(gum style --bold --foreground "$CLR_PRIMARY" "$(get_friendly_name laf "$laf_dark")")"
 
     if [[ "$laf_light" == "$laf_dark" ]]; then
-        echo -e "${RED}Error: ☀️ Light and 🌙 Dark LookAndFeel are the same ($laf_light).${RESET}" >&2
-        echo "Configure different themes in System Settings > Colors & Themes > Global Theme." >&2
-        exit 1
+        die "☀️ Light and 🌙 Dark LookAndFeel are the same ($laf_light).\nConfigure different themes in System Settings > Colors & Themes > Global Theme."
     fi
+
+    msg_header "Configure Sub-Themes"
+    msg_muted "Override individual settings for light and dark modes."
+    echo ""
 
     # Select Color Schemes
     if [[ "$configure_all" == true || "$configure_colors" == true ]]; then
@@ -2723,12 +2936,13 @@ do_configure() {
     fi
 
     # Select Kvantum themes
+    local _flatpak_warned=false
     if [[ "$configure_all" == true || "$configure_kvantum" == true ]]; then
         kvantum_flatpak_callback() {
             if command -v flatpak &>/dev/null; then
                 setup_flatpak_permissions
                 setup_flatpak_kvantum
-                echo -e "${YELLOW}Note:${RESET} Flatpak apps may need to be closed and reopened to update theme."
+                _flatpak_warned=true
             fi
         }
         if ! select_themes "Configure Kvantum themes? (not automatically set by global theme)" scan_kvantum_themes KVANTUM "" kvantum_flatpak_callback; then
@@ -2750,7 +2964,7 @@ do_configure() {
         gtk_callback() {
             if command -v flatpak &>/dev/null; then
                 setup_flatpak_permissions
-                echo -e "${YELLOW}Note:${RESET} Flatpak apps may need to be closed and reopened to update theme."
+                msg_warn "Flatpak apps may need to be closed and reopened to update theme."
             fi
         }
         if ! select_themes "Configure GTK/Flatpak themes? (not automatically set by global theme)" scan_gtk_themes GTK "" gtk_callback; then
@@ -2787,7 +3001,7 @@ do_configure() {
             PLASMA_CHANGEICONS=$(find /usr/lib /usr/libexec /usr/lib64 -name "plasma-changeicons" -print -quit 2>/dev/null || true)
         fi
         if [[ -z "$PLASMA_CHANGEICONS" ]]; then
-            echo "Error: plasma-changeicons not found." >&2
+            msg_err "plasma-changeicons not found."
             exit 1
         fi
         if ! select_themes "Configure icon themes? (normally automatically set by global theme)" scan_icon_themes ICON; then
@@ -2815,10 +3029,7 @@ do_configure() {
 
     # Select Login Screen (SDDM) Themes
     if [[ "$configure_all" == true || "$configure_login" == true ]]; then
-    echo ""
-    read -rp "Configure login screen (SDDM) themes? (requires sudo) [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo "Scanning for SDDM themes..."
+    if _gum_confirm "Configure login screen (SDDM) themes? (requires sudo)"; then
         local sddm_ids=() sddm_names=()
         while IFS='|' read -r id name; do
             sddm_ids+=("$id")
@@ -2826,39 +3037,34 @@ do_configure() {
         done < <(scan_sddm_themes)
 
         if [[ ${#sddm_ids[@]} -eq 0 ]]; then
-            echo -e "${YELLOW}No SDDM themes found in /usr/share/sddm/themes/${RESET}"
+            msg_warn "No SDDM themes found in /usr/share/sddm/themes/"
             SDDM_LIGHT=""
             SDDM_DARK=""
         else
+            local light_choice dark_choice
+            light_choice=$(printf '%s\n' "${sddm_names[@]}" | _gum_choose --header "Select ☀️ LIGHT mode login theme") || true
+            dark_choice=$(printf '%s\n' "${sddm_names[@]}" | _gum_choose --header "Select 🌙 DARK mode login theme") || true
+
+            msg_muted "Login screen (SDDM) themes"
+            echo "  ☀️ $(gum style --bold --foreground "$CLR_PRIMARY" "$light_choice")"
+            echo "  🌙 $(gum style --bold --foreground "$CLR_PRIMARY" "$dark_choice")"
             echo ""
-            echo -e "${BOLD}Available SDDM themes:${RESET}"
+
+            # Map display name back to id
+            SDDM_LIGHT=""
+            SDDM_DARK=""
             for i in "${!sddm_names[@]}"; do
-                printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${sddm_names[$i]}"
+                [[ "${sddm_names[$i]}" == "$light_choice" ]] && SDDM_LIGHT="${sddm_ids[$i]}"
+                [[ "${sddm_names[$i]}" == "$dark_choice" ]] && SDDM_DARK="${sddm_ids[$i]}"
             done
-
-            echo ""
-            read -rp "Select ☀️ LIGHT mode login theme [1-${#sddm_ids[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#sddm_ids[@]} )); then
-                SDDM_LIGHT="${sddm_ids[$((choice - 1))]}"
-            else
-                SDDM_LIGHT=""
-            fi
-
-            read -rp "Select 🌙 DARK mode login theme [1-${#sddm_ids[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#sddm_ids[@]} )); then
-                SDDM_DARK="${sddm_ids[$((choice - 1))]}"
-            else
-                SDDM_DARK=""
-            fi
 
             # Set up sudoers rule for non-interactive SDDM switching
             if [[ -n "${SDDM_LIGHT:-}" || -n "${SDDM_DARK:-}" ]]; then
-                echo ""
-                echo "Setting up passwordless sudo for SDDM theme switching..."
-                sudo -v || { echo -e "${RED}Sudo required for SDDM theme switching.${RESET}"; SDDM_LIGHT=""; SDDM_DARK=""; }
+                msg_info "Setting up passwordless sudo for SDDM theme switching..."
+                sudo_auth || { msg_err "Sudo required for SDDM theme switching."; SDDM_LIGHT=""; SDDM_DARK=""; }
                 if [[ -n "${SDDM_LIGHT:-}" || -n "${SDDM_DARK:-}" ]]; then
                     setup_sddm_sudoers
-                    echo -e "${GREEN}SDDM sudoers rule installed.${RESET}"
+                    msg_ok "SDDM sudoers rule installed."
                 fi
             fi
         fi
@@ -2868,30 +3074,37 @@ do_configure() {
     fi
     fi
 
+    echo ""
+
     # Configure day/night wallpapers
     if [[ "$configure_all" == true || "$configure_wallpaper" == true ]]; then
-    echo ""
-    read -rp "Configure wallpapers? (normally automatically set by global theme) [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo ""
-        read -rp "Enter ☀️ LIGHT wallpaper path(s) (space-separated files, or a folder): " wp_light_input
+    if _gum_confirm "Configure wallpapers? (normally automatically set by global theme)"; then
+        local wp_light_input
+        wp_light_input=$(_gum_input \
+            --header "☀️ LIGHT wallpaper path(s)" \
+            --placeholder "Space-separated files, or a folder" \
+            --width 60)
         local wp_light_paths=()
         while IFS= read -r img; do
             wp_light_paths+=("$img")
         done < <(resolve_image_paths "$wp_light_input")
 
         if [[ ${#wp_light_paths[@]} -eq 0 ]]; then
-            echo -e "${YELLOW}No valid images found for light mode.${RESET}"
+            msg_warn "No valid images found for light mode."
         fi
 
-        read -rp "Enter 🌙 DARK wallpaper path(s) (space-separated files, or a folder): " wp_dark_input
+        local wp_dark_input
+        wp_dark_input=$(_gum_input \
+            --header "🌙 DARK wallpaper path(s)" \
+            --placeholder "Space-separated files, or a folder" \
+            --width 60)
         local wp_dark_paths=()
         while IFS= read -r img; do
             wp_dark_paths+=("$img")
         done < <(resolve_image_paths "$wp_dark_input")
 
         if [[ ${#wp_dark_paths[@]} -eq 0 ]]; then
-            echo -e "${YELLOW}No valid images found for dark mode.${RESET}"
+            msg_warn "No valid images found for dark mode."
         fi
 
         if [[ ${#wp_light_paths[@]} -gt 0 && ${#wp_dark_paths[@]} -gt 0 ]]; then
@@ -2899,39 +3112,31 @@ do_configure() {
             WP_SOURCE_LIGHT="${wp_light_paths[*]}"
             WP_SOURCE_DARK="${wp_dark_paths[*]}"
 
-            echo ""
-            echo "Creating wallpaper pack..."
+            _spinner_start "Creating wallpaper pack..."
             generate_wallpaper_pack "gloam" "Custom" wp_light_paths wp_dark_paths
 
-            echo ""
             local wallpaper_dir
             if [[ "${THEME_INSTALL_GLOBAL:-${INSTALL_GLOBAL:-false}}" == true ]]; then
                 wallpaper_dir="/usr/share/wallpapers/gloam"
             else
                 wallpaper_dir="${HOME}/.local/share/wallpapers/gloam"
             fi
-            echo -n "Applying to desktop... "
             apply_desktop_wallpaper "$wallpaper_dir"
-            echo -e "${GREEN}done${RESET}"
-
-            echo -n "Applying to lock screen... "
             apply_lockscreen_wallpaper "$wallpaper_dir"
-            echo -e "${GREEN}done${RESET}"
+            _spinner_stop
 
-            echo ""
-            read -rp "Set SDDM login background? (requires sudo) [y/N]: " sddm_wp_choice
-            if [[ "$sddm_wp_choice" =~ ^[Yy]$ ]]; then
-                sudo -v || { echo -e "${RED}Sudo required for SDDM wallpaper.${RESET}"; sddm_wp_choice="n"; }
-                if [[ "$sddm_wp_choice" =~ ^[Yy]$ ]]; then
+            if _gum_confirm "Set SDDM login background? (requires sudo)"; then
+                sudo_auth || { msg_err "Sudo required for SDDM wallpaper."; }
+                if sudo -n true 2>/dev/null; then
                     setup_sddm_wallpaper
-                    echo -e "  ${GREEN}SDDM backgrounds installed.${RESET}"
+                    msg_ok "SDDM backgrounds installed."
                     apply_sddm_for_current_mode
                 fi
             fi
 
             WALLPAPER=true
         else
-            echo -e "${YELLOW}Need at least one image for each mode. Skipping wallpaper.${RESET}"
+            msg_warn "Need at least one image for each mode. Skipping wallpaper."
             WALLPAPER=""
         fi
     else
@@ -2941,39 +3146,25 @@ do_configure() {
 
     # Select Konsole profiles
     if [[ "$configure_all" == true || "$configure_konsole" == true ]]; then
-    echo ""
-    read -rp "Configure Konsole profiles? (not automatically set by global theme) [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo "Scanning for Konsole profiles..."
+    if _gum_confirm "Configure Konsole profiles? (not automatically set by global theme)"; then
         mapfile -t konsole_profiles < <(scan_konsole_profiles)
 
         if [[ ${#konsole_profiles[@]} -eq 0 ]]; then
-            echo "No Konsole profiles found, skipping."
+            msg_muted "No Konsole profiles found, skipping."
             KONSOLE_LIGHT=""
             KONSOLE_DARK=""
         else
-            echo ""
-            echo -e "${BOLD}Available Konsole profiles:${RESET}"
-            for i in "${!konsole_profiles[@]}"; do
-                printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${konsole_profiles[$i]}"
-            done
+            local light_choice dark_choice
+            light_choice=$(printf '%s\n' "${konsole_profiles[@]}" | _gum_choose --header "Select ☀️ LIGHT mode Konsole profile") || true
+            dark_choice=$(printf '%s\n' "${konsole_profiles[@]}" | _gum_choose --header "Select 🌙 DARK mode Konsole profile") || true
 
             echo ""
-            read -rp "Select ☀️ LIGHT mode Konsole profile [1-${#konsole_profiles[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#konsole_profiles[@]} )); then
-                KONSOLE_LIGHT="${konsole_profiles[$((choice - 1))]}"
+            msg_muted "Konsole profiles"
+            echo "  ☀️ $(gum style --bold --foreground "$CLR_PRIMARY" "$light_choice")"
+            echo "  🌙 $(gum style --bold --foreground "$CLR_PRIMARY" "$dark_choice")"
 
-                read -rp "Select 🌙 DARK mode Konsole profile [1-${#konsole_profiles[@]}]: " choice
-                if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#konsole_profiles[@]} )); then
-                    KONSOLE_DARK="${konsole_profiles[$((choice - 1))]}"
-                else
-                    KONSOLE_LIGHT=""
-                    KONSOLE_DARK=""
-                fi
-            else
-                KONSOLE_LIGHT=""
-                KONSOLE_DARK=""
-            fi
+            KONSOLE_LIGHT="${light_choice:-}"
+            KONSOLE_DARK="${dark_choice:-}"
         fi
     else
         KONSOLE_LIGHT=""
@@ -2983,18 +3174,21 @@ do_configure() {
 
     # Configure custom scripts
     if [[ "$configure_all" == true || "$configure_script" == true ]]; then
-    echo ""
-    read -rp "Configure custom scripts? [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo ""
-        read -rp "Enter ☀️ LIGHT mode script path (leave empty to skip): " SCRIPT_LIGHT
+    if _gum_confirm "Configure custom scripts?"; then
+        SCRIPT_LIGHT=$(_gum_input \
+            --header "☀️ LIGHT mode script path" \
+            --placeholder "Leave empty to skip" \
+            --width 60) || true
         if [[ -n "$SCRIPT_LIGHT" && ! -x "$SCRIPT_LIGHT" ]]; then
-            echo "Warning: $SCRIPT_LIGHT is not executable" >&2
+            msg_warn "$SCRIPT_LIGHT is not executable"
         fi
 
-        read -rp "Enter 🌙 DARK mode script path (leave empty to skip): " SCRIPT_DARK
+        SCRIPT_DARK=$(_gum_input \
+            --header "🌙 DARK mode script path" \
+            --placeholder "Leave empty to skip" \
+            --width 60) || true
         if [[ -n "$SCRIPT_DARK" && ! -x "$SCRIPT_DARK" ]]; then
-            echo "Warning: $SCRIPT_DARK is not executable" >&2
+            msg_warn "$SCRIPT_DARK is not executable"
         fi
 
         # Copy scripts globally if global install and script is in user's home
@@ -3004,14 +3198,12 @@ do_configure() {
                 sudo cp "$SCRIPT_LIGHT" "$GLOBAL_SCRIPTS_DIR/$(basename "$SCRIPT_LIGHT")"
                 sudo chmod +x "$GLOBAL_SCRIPTS_DIR/$(basename "$SCRIPT_LIGHT")"
                 SCRIPT_LIGHT="$GLOBAL_SCRIPTS_DIR/$(basename "$SCRIPT_LIGHT")"
-                echo "Installed light script globally"
             fi
             if [[ -n "$SCRIPT_DARK" && -f "$SCRIPT_DARK" && "$SCRIPT_DARK" == "$HOME"* ]]; then
                 sudo mkdir -p "$GLOBAL_SCRIPTS_DIR"
                 sudo cp "$SCRIPT_DARK" "$GLOBAL_SCRIPTS_DIR/$(basename "$SCRIPT_DARK")"
                 sudo chmod +x "$GLOBAL_SCRIPTS_DIR/$(basename "$SCRIPT_DARK")"
                 SCRIPT_DARK="$GLOBAL_SCRIPTS_DIR/$(basename "$SCRIPT_DARK")"
-                echo "Installed dark script globally"
             fi
         fi
     else
@@ -3022,13 +3214,12 @@ do_configure() {
 
     # Check if anything was configured
     if ! has_any_config; then
-        echo ""
-        echo "Nothing to configure. Exiting."
+        msg_muted "Nothing to configure. Exiting."
         exit 0
     fi
 
     echo ""
-    echo "Configuration summary:"
+    msg_info "Configuration summary:"
     print_config_summary "$laf_light" "$laf_dark"
 
     # Preserve values from config if doing partial reconfigure
@@ -3051,8 +3242,8 @@ do_configure() {
             custom_themes_exist=true
         else
             # Old config without base themes - need full reconfigure
-            echo -e "${YELLOW}Warning: Custom themes exist but base themes are not recorded.${RESET}"
-            echo "Please run a full reconfigure to regenerate custom themes."
+            msg_warn "Custom themes exist but base themes are not recorded."
+            msg_muted "Please run a full reconfigure to regenerate custom themes."
             CUSTOM_THEME_LIGHT=""
             CUSTOM_THEME_DARK=""
         fi
@@ -3069,18 +3260,16 @@ do_configure() {
 
     if [[ "$custom_themes_exist" == true ]]; then
         # Custom themes exist - regenerate automatically
-        echo ""
-        echo "Regenerating custom themes..."
 
         # Verify base themes still exist
         if ! check_base_theme_exists "$BASE_THEME_LIGHT"; then
-            echo -e "${RED}Error: Base theme '$BASE_THEME_LIGHT' is no longer installed.${RESET}"
-            echo "Please reinstall the theme or run a full reconfigure to select a new base theme."
+            msg_err "Base theme '$BASE_THEME_LIGHT' is no longer installed."
+            msg_muted "Please reinstall the theme or run a full reconfigure to select a new base theme."
             exit 1
         fi
         if ! check_base_theme_exists "$BASE_THEME_DARK"; then
-            echo -e "${RED}Error: Base theme '$BASE_THEME_DARK' is no longer installed.${RESET}"
-            echo "Please reinstall the theme or run a full reconfigure to select a new base theme."
+            msg_err "Base theme '$BASE_THEME_DARK' is no longer installed."
+            msg_muted "Please reinstall the theme or run a full reconfigure to select a new base theme."
             exit 1
         fi
 
@@ -3091,6 +3280,7 @@ do_configure() {
             THEME_INSTALL_DIR="${HOME}/.local/share/plasma/look-and-feel"
         fi
 
+        _spinner_start "Regenerating custom themes..."
         generate_custom_theme "light" "$BASE_THEME_LIGHT"
         generate_custom_theme "dark" "$BASE_THEME_DARK"
         bundle_wallpapers_and_sddm
@@ -3104,37 +3294,30 @@ do_configure() {
         LAF_LIGHT="$laf_light"
         LAF_DARK="$laf_dark"
         if [[ "$current_laf" == "$CUSTOM_THEME_DARK" || "$current_laf" == "$BASE_THEME_DARK" ]]; then
-            echo -e "Switching to 🌙 Dark theme: ${BOLD}$(get_friendly_name laf "$LAF_DARK")${RESET}"
-            plasma-apply-lookandfeel -a "$LAF_DARK"
+            plasma-apply-lookandfeel -a "$LAF_DARK" 2>/dev/null
         else
-            echo -e "Switching to ☀️ Light theme: ${BOLD}$(get_friendly_name laf "$LAF_LIGHT")${RESET}"
-            plasma-apply-lookandfeel -a "$LAF_LIGHT"
+            plasma-apply-lookandfeel -a "$LAF_LIGHT" 2>/dev/null
         fi
 
         reapply_bundled_wallpapers
-
         apply_sddm_for_current_mode
+        _spinner_stop
 
-        echo -e "${GREEN}Custom themes updated.${RESET}"
+        msg_ok "Custom themes updated."
 
     elif has_bundleable_options current; then
         # First time - ask user if they want custom themes
+        msg_header "Custom Themes"
+        msg_muted "Bundles your selections into native Plasma themes so overrides are applied" \
+            "automatically during theme switches — no manual reapplication needed."
         echo ""
-        echo -e "${BOLD}Custom Themes${RESET}"
-        echo "Bundles your selections into native Plasma themes so overrides are applied"
-        echo "automatically during theme switches — no manual reapplication needed."
-        echo ""
-        echo -ne "Generate custom themes from your selections? (${BOLD}Recommended${RESET}) [Y/n]: "
-        read -r gen_choice
-        if [[ ! "$gen_choice" =~ ^[Nn]$ ]]; then
+        if _gum_confirm --default=yes "Generate custom themes from your selections? (Recommended)"; then
             if request_sudo_for_global_install; then
-                echo ""
-                echo "Generating custom themes..."
-
                 # Store base themes for future regeneration
                 BASE_THEME_LIGHT="$laf_light"
                 BASE_THEME_DARK="$laf_dark"
 
+                _spinner_start "Generating custom themes..."
                 generate_custom_theme "light" "$BASE_THEME_LIGHT"
                 generate_custom_theme "dark" "$BASE_THEME_DARK"
                 bundle_wallpapers_and_sddm
@@ -3156,11 +3339,9 @@ do_configure() {
                 LAF_LIGHT="$laf_light"
                 LAF_DARK="$laf_dark"
                 if [[ "$current_laf" == "$BASE_THEME_DARK" ]]; then
-                    echo -e "Switching to 🌙 Dark theme: ${BOLD}$(get_friendly_name laf "$LAF_DARK")${RESET}"
-                    plasma-apply-lookandfeel -a "$LAF_DARK"
+                    plasma-apply-lookandfeel -a "$LAF_DARK" 2>/dev/null
                 else
-                    echo -e "Switching to ☀️ Light theme: ${BOLD}$(get_friendly_name laf "$LAF_LIGHT")${RESET}"
-                    plasma-apply-lookandfeel -a "$LAF_LIGHT"
+                    plasma-apply-lookandfeel -a "$LAF_LIGHT" 2>/dev/null
                 fi
 
                 # Re-apply wallpapers from bundled location
@@ -3171,8 +3352,9 @@ do_configure() {
                 fi
 
                 apply_sddm_for_current_mode
+                _spinner_stop
 
-                echo -e "${GREEN}Custom themes installed and set as defaults.${RESET}"
+                msg_ok "Custom themes installed and set as defaults."
             fi
         fi
     fi
@@ -3182,8 +3364,6 @@ do_configure() {
     # Import: generate custom themes and apply settings
     if [[ -n "${IMPORT_CONFIG}" && -n "${BASE_THEME_LIGHT:-}" && -n "${BASE_THEME_DARK:-}" ]]; then
         echo ""
-        echo "Generating custom themes..."
-
         if [[ "${THEME_INSTALL_GLOBAL:-false}" == true ]]; then
             THEME_INSTALL_DIR="/usr/share/plasma/look-and-feel"
         else
@@ -3193,12 +3373,12 @@ do_configure() {
         CUSTOM_THEME_LIGHT="org.kde.custom.light"
         CUSTOM_THEME_DARK="org.kde.custom.dark"
 
+        _spinner_start "Generating custom themes..."
         generate_custom_theme "light" "$BASE_THEME_LIGHT"
         generate_custom_theme "dark" "$BASE_THEME_DARK"
 
         # Regenerate wallpaper pack from original source images
         if [[ "${WALLPAPER:-}" == true && -n "${WP_SOURCE_LIGHT:-}" && -n "${WP_SOURCE_DARK:-}" ]]; then
-            echo "Creating wallpaper pack..."
             local wp_light_paths=() wp_dark_paths=()
             local img
             for img in ${WP_SOURCE_LIGHT}; do
@@ -3237,15 +3417,16 @@ do_configure() {
         LAF_LIGHT="$laf_light"
         LAF_DARK="$laf_dark"
         if [[ "$current_laf" == "$CUSTOM_THEME_DARK" || "$current_laf" == "$BASE_THEME_DARK" ]]; then
-            plasma-apply-lookandfeel -a "$LAF_DARK"
+            plasma-apply-lookandfeel -a "$LAF_DARK" 2>/dev/null
         else
-            plasma-apply-lookandfeel -a "$LAF_LIGHT"
+            plasma-apply-lookandfeel -a "$LAF_LIGHT" 2>/dev/null
         fi
 
         reapply_bundled_wallpapers
         apply_sddm_for_current_mode
+        _spinner_stop
 
-        echo -e "${GREEN}Custom themes installed.${RESET}"
+        msg_ok "Custom themes installed."
     fi
 
     # Store LAF values for push_config_to_users and set_system_defaults
@@ -3317,8 +3498,8 @@ EOF
     # Handle widget-only or shortcut-only configuration
     if [[ "$configure_widget" == true || "$configure_shortcut" == true ]] && [[ "$configure_all" == false ]]; then
         if [[ "$installed_previously" == false ]]; then
-            echo -e "${RED}Error: Widget and shortcut require the CLI to be installed first.${RESET}" >&2
-            echo "Run 'gloam configure' first." >&2
+            msg_err "Widget and shortcut require the CLI to be installed first."
+            msg_muted "Run 'gloam configure' first."
             exit 1
         fi
         install_cli_binary
@@ -3334,48 +3515,50 @@ EOF
     elif [[ -n "${IMPORT_CONFIG}" ]]; then
         # Import mode - install based on config flags
         if [[ "${INSTALL_CLI:-false}" == true ]]; then
+            msg_header "Install Tools"
+            msg_muted "Install the CLI, panel widget, and keyboard shortcut."
             install_cli_binary
             executable_path="$cli_path"
-            echo ""
-            echo -e "${GREEN}Installed to $cli_path${RESET}"
+            msg_ok "Installed to $cli_path"
             [[ "${INSTALL_WIDGET:-false}" == true ]] && install_plasmoid
             [[ "${INSTALL_SHORTCUT:-false}" == true ]] && install_shortcut
         else
             executable_path=$(readlink -f "$0")
         fi
     elif [[ "$configure_all" == true ]]; then
+        msg_header "Install Tools"
+        msg_muted "Install the CLI, panel widget, and keyboard shortcut."
+
         # Install the CLI
         local install_cli_prompt
         install_cli_prompt="Install 'gloam' to $(get_cli_path)?"
 
-        echo ""
-        read -rp "$install_cli_prompt [y/N]: " choice
-        if [[ "$choice" =~ ^[Yy]$ ]]; then
+        if _gum_confirm "$install_cli_prompt"; then
             INSTALL_CLI=true
             install_cli_binary
             executable_path="$cli_path"
-            echo -e "${GREEN}Installed to $cli_path${RESET}"
+            msg_ok "Installed to $cli_path"
 
             # Offer to install the panel widget
-            echo ""
-            read -rp "Install the Light/Dark Mode Toggle panel widget? [y/N]: " choice
-            [[ "$choice" =~ ^[Yy]$ ]] && { INSTALL_WIDGET=true; install_plasmoid; }
+            if _gum_confirm "Install the Light/Dark Mode Toggle panel widget?"; then
+                INSTALL_WIDGET=true; install_plasmoid
+            fi
 
             # Offer to install keyboard shortcut
-            echo ""
-            read -rp "Add a keyboard shortcut (Meta+Shift+L) to toggle themes? [y/N]: " choice
-            [[ "$choice" =~ ^[Yy]$ ]] && { INSTALL_SHORTCUT=true; install_shortcut; }
+            if _gum_confirm "Add a keyboard shortcut (Meta+Shift+L)?"; then
+                INSTALL_SHORTCUT=true; install_shortcut
+            fi
         else
             # Use absolute path of current script
             executable_path=$(readlink -f "$0")
-            echo ""
-            echo -e "${YELLOW}Note:${RESET} The panel widget and keyboard shortcut require the CLI to be installed."
+            msg_warn "The panel widget and keyboard shortcut require the CLI to be installed."
         fi
     else
         executable_path=$(readlink -f "$0")
     fi
 
     # Install systemd service
+    msg_header "Activate"
     local exec_condition=""
     if [[ "$INSTALL_GLOBAL" == true ]]; then
         exec_condition=$'\nExecCondition=/bin/sh -c \'[ "$(id -u)" -ge 1000 ]\''
@@ -3406,8 +3589,7 @@ WantedBy=default.target"
     # Enable automatic theme switching in KDE Quick Settings
     kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
 
-    echo ""
-    echo -e "${GREEN}Successfully configured and started $SERVICE_NAME.${RESET}"
+    msg_ok "Successfully configured and started $SERVICE_NAME."
 
     # Push config to other users if requested
     push_config_to_users
@@ -3433,10 +3615,11 @@ WantedBy=default.target"
     fi
 
     if [[ -z "$is_patched" ]] && command -v nm &>/dev/null; then
-        echo -e "\n${YELLOW}Note:${RESET} Standard Qt apps (Dolphin, Kate, etc.) require a patch to refresh themes without restarting."
-        echo "If you want seamless live-switching, install the forcerefresh patch:"
-        echo "  git clone https://github.com/edmogeor/plasma-qt-forcerefresh.git"
-        echo "  cd plasma-qt-forcerefresh && ./plasma-integration-patch-manager.sh install"
+        echo ""
+        msg_warn "Standard Qt apps (Dolphin, Kate, etc.) require a patch to refresh themes without restarting."
+        msg_muted "If you want seamless live-switching, install the forcerefresh patch:"
+        msg_muted "  git clone https://github.com/edmogeor/plasma-qt-forcerefresh.git"
+        msg_muted "  cd plasma-qt-forcerefresh && ./plasma-integration-patch-manager.sh install"
     fi
 }
 
@@ -3462,23 +3645,27 @@ do_remove() {
             admin_user=$(grep "^user=" "$GLOBAL_INSTALL_MARKER" 2>/dev/null | cut -d= -f2)
             admin_date=$(grep "^date=" "$GLOBAL_INSTALL_MARKER" 2>/dev/null | cut -d= -f2)
 
+            gum style --border double --border-foreground "$CLR_WARNING" --padding "0 2" --foreground "$CLR_WARNING" \
+                "$(gum style --bold "⚠ This will remove the global installation.")" \
+                "" \
+                "Configured by: ${admin_user:-unknown}" \
+                "Date: ${admin_date:-unknown}" \
+                "" \
+                "This will affect ALL users on this system."
             echo ""
-            echo -e "${YELLOW}Warning: This will remove the global installation.${RESET}"
-            echo "  Configured by: ${admin_user:-unknown}"
-            echo "  Date: ${admin_date:-unknown}"
-            echo ""
-            echo "This will affect ALL users on this system."
-            read -rp "Continue with removal? [y/N]: " choice
-            [[ ! "$choice" =~ ^[Yy]$ ]] && { echo "Removal cancelled."; exit 0; }
+            _gum_confirm "Continue with removal?" || { msg_muted "Removal cancelled."; exit 0; }
         fi
 
-        echo "Requesting sudo..."
-        sudo -v || { echo -e "${RED}Sudo required to remove global files.${RESET}"; exit 1; }
+        msg_info "Requesting sudo..."
+        sudo_auth || { msg_err "Sudo required to remove global files."; exit 1; }
     fi
 
-    echo ""
-    echo -e "${BOLD}Removing configuration...${RESET}"
-    echo ""
+    _spinner_start "Removing gloam..."
+
+    # Helper to print removal status
+    _remove_print() {
+        _spinner_print "$(msg_muted "Removed: $1")"
+    }
 
     # Stop and disable service
     systemctl --user stop "$SERVICE_NAME" 2>/dev/null || true
@@ -3493,21 +3680,17 @@ do_remove() {
         # Reset Quick Settings to original themes
         if [[ -n "$base_light" ]]; then
             kwriteconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel "$base_light"
-            echo "Reset light theme to: $base_light"
         fi
         if [[ -n "$base_dark" ]]; then
             kwriteconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel "$base_dark"
-            echo "Reset dark theme to: $base_dark"
         fi
 
         # Apply the appropriate base theme if currently using custom theme
         local current_laf
         current_laf=$(kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage 2>/dev/null)
         if [[ "$current_laf" == "org.kde.custom.light" && -n "$base_light" ]]; then
-            echo "Applying original theme: $base_light"
             plasma-apply-lookandfeel -a "$base_light" 2>/dev/null || true
         elif [[ "$current_laf" == "org.kde.custom.dark" && -n "$base_dark" ]]; then
-            echo "Applying original theme: $base_dark"
             plasma-apply-lookandfeel -a "$base_dark" 2>/dev/null || true
         fi
 
@@ -3556,10 +3739,8 @@ do_remove() {
                         mkdir -p "$_moved_from"
                         sudo cp -r "$_global_path" "${_moved_from}/${_restore_name}"
                         sudo chown -R "$(id -u):$(id -g)" "${_moved_from}/${_restore_name}"
-                        echo "Restored ${_restore_name} to ${_moved_from}/"
                     fi
                     sudo rm -rf "$_global_path"
-                    echo "Removed $_global_path"
                 done
             done
         done
@@ -3579,7 +3760,6 @@ do_remove() {
                     flatpak override --user --unset-env="$var" 2>/dev/null || true
                 fi
             done
-            echo "Reset Flatpak theme overrides"
         elif [[ -f "$CONFIG_FILE" ]] && grep -qE "^GTK_(LIGHT|DARK)=.+" "$CONFIG_FILE" 2>/dev/null; then
             # Fallback for installs before tracking (only if gloam configured GTK themes)
             local flatpak_overrides="${HOME}/.local/share/flatpak/overrides/global"
@@ -3587,39 +3767,38 @@ do_remove() {
                 flatpak override --user --unset-env=GTK_THEME 2>/dev/null || true
                 flatpak override --user --unset-env=GTK_ICON_THEME 2>/dev/null || true
                 flatpak override --user --unset-env=QT_STYLE_OVERRIDE 2>/dev/null || true
-                echo "Reset Flatpak theme overrides"
             fi
         fi
     fi
 
     # Remove config and log files
-    [[ -f "$CONFIG_FILE" ]] && rm "$CONFIG_FILE" && echo "Removed $CONFIG_FILE" || true
-    [[ -f "$LOG_FILE" ]] && rm "$LOG_FILE" && echo "Removed $LOG_FILE" || true
+    [[ -f "$CONFIG_FILE" ]] && { rm "$CONFIG_FILE"; _remove_print "configuration (~/.config/gloam.conf)"; }
+    [[ -f "$LOG_FILE" ]] && { rm "$LOG_FILE"; _remove_print "log file"; }
 
     # Remove service files
     local local_service="${HOME}/.config/systemd/user/${SERVICE_NAME}.service"
-    [[ -f "$local_service" ]] && rm "$local_service" && echo "Removed $local_service" || true
-    [[ -L "$global_service_link" ]] && sudo rm "$global_service_link" && echo "Removed $global_service_link" || true
-    [[ -f "$global_service" ]] && sudo rm "$global_service" && echo "Removed $global_service" || true
+    [[ -f "$local_service" ]] && { rm "$local_service"; _remove_print "user service"; }
+    [[ -L "$global_service_link" ]] && { sudo rm "$global_service_link"; _remove_print "global service autostart"; }
+    [[ -f "$global_service" ]] && { sudo rm "$global_service"; _remove_print "global service (/etc/systemd/user/gloam.service)"; }
 
     # Remove CLI
     local local_cli="${HOME}/.local/bin/gloam"
-    [[ -f "$local_cli" ]] && rm "$local_cli" && echo "Removed $local_cli" || true
-    [[ -f "$global_cli" ]] && sudo rm "$global_cli" && echo "Removed $global_cli" || true
+    [[ -f "$local_cli" ]] && { rm "$local_cli"; _remove_print "CLI (~/.local/bin/gloam)"; }
+    [[ -f "$global_cli" ]] && { sudo rm "$global_cli"; _remove_print "CLI (/usr/local/bin/gloam)"; }
 
     # Remove global scripts
-    [[ -d "$GLOBAL_SCRIPTS_DIR" ]] && sudo rm -rf "$GLOBAL_SCRIPTS_DIR" && echo "Removed $GLOBAL_SCRIPTS_DIR" || true
+    [[ -d "$GLOBAL_SCRIPTS_DIR" ]] && { sudo rm -rf "$GLOBAL_SCRIPTS_DIR"; _remove_print "custom scripts"; }
 
     # Remove SDDM sudoers rule and wrapper script
-    [[ -f /etc/sudoers.d/gloam-sddm ]] && sudo rm /etc/sudoers.d/gloam-sddm && echo "Removed /etc/sudoers.d/gloam-sddm" || true
-    [[ -f /etc/sudoers.d/gloam-sddm-bg ]] && sudo rm /etc/sudoers.d/gloam-sddm-bg && echo "Removed /etc/sudoers.d/gloam-sddm-bg" || true
-    [[ -d /usr/local/lib/gloam ]] && sudo rm -rf /usr/local/lib/gloam && echo "Removed /usr/local/lib/gloam" || true
+    [[ -f /etc/sudoers.d/gloam-sddm ]] && { sudo rm /etc/sudoers.d/gloam-sddm; _remove_print "SDDM theme sudoers rule"; }
+    [[ -f /etc/sudoers.d/gloam-sddm-bg ]] && { sudo rm /etc/sudoers.d/gloam-sddm-bg; _remove_print "SDDM background sudoers rule"; }
+    [[ -d /usr/local/lib/gloam ]] && { sudo rm -rf /usr/local/lib/gloam; _remove_print "SDDM background helper"; }
 
     # Remove plasmoid, shortcut, and custom themes
-    remove_plasmoid
-    remove_shortcut
-    remove_custom_themes
-    remove_wallpaper_packs
+    if remove_plasmoid; then _remove_print "panel widget"; fi
+    if remove_shortcut; then _remove_print "keyboard shortcut (Meta+Shift+L)"; fi
+    if remove_custom_themes; then _remove_print "custom themes (org.kde.custom.light/dark)"; fi
+    if remove_wallpaper_packs; then _remove_print "wallpaper pack"; fi
 
     # Remove system defaults for new users (only files/dirs gloam created)
     local skel_files_csv="" skel_dirs_csv=""
@@ -3628,25 +3807,28 @@ do_remove() {
         skel_dirs_csv=$(grep "^skel_dirs_created=" "$GLOBAL_INSTALL_MARKER" 2>/dev/null | cut -d= -f2-) || true
     fi
 
+    local skel_removed=false
     if [[ -n "$skel_files_csv" ]]; then
         # Tracked install: only remove files gloam created
         IFS=',' read -ra created_files <<< "$skel_files_csv"
         for cfg in "${created_files[@]}"; do
-            [[ -f "/etc/skel/.config/${cfg}" ]] && sudo rm "/etc/skel/.config/${cfg}" && echo "Removed /etc/skel/.config/${cfg}" || true
+            [[ -f "/etc/skel/.config/${cfg}" ]] && { sudo rm "/etc/skel/.config/${cfg}"; skel_removed=true; }
         done
     else
         # No skel tracking (legacy install or set_system_defaults wasn't used): remove gloam.conf only
-        [[ -f "$skel_config" ]] && sudo rm "$skel_config" && echo "Removed $skel_config" || true
+        [[ -f "$skel_config" ]] && { sudo rm "$skel_config"; skel_removed=true; }
     fi
 
     if [[ -n "$skel_dirs_csv" ]]; then
         IFS=',' read -ra created_dirs <<< "$skel_dirs_csv"
         for dir in "${created_dirs[@]}"; do
-            [[ -d "/etc/skel/.local/share/${dir}" ]] && sudo rm -rf "/etc/skel/.local/share/${dir}" && echo "Removed /etc/skel/.local/share/${dir}" || true
+            [[ -d "/etc/skel/.local/share/${dir}" ]] && { sudo rm -rf "/etc/skel/.local/share/${dir}"; skel_removed=true; }
         done
     fi
+    [[ "$skel_removed" == true ]] && _remove_print "system defaults (/etc/skel)"
 
     # Remove/restore keys gloam set in /etc/xdg/kdeglobals
+    local xdg_removed=false
     if [[ -f /etc/xdg/kdeglobals && -f "$GLOBAL_INSTALL_MARKER" ]]; then
         # Delete keys that gloam added (didn't exist before)
         local added_keys_csv
@@ -3656,6 +3838,7 @@ do_remove() {
             for entry in "${added_keys[@]}"; do
                 local group="${entry%%:*}" key="${entry#*:}"
                 sudo kwriteconfig6 --file /etc/xdg/kdeglobals --group "$group" --key "$key" --delete 2>/dev/null || true
+                xdg_removed=true
             done
         fi
 
@@ -3668,131 +3851,162 @@ do_remove() {
                 local gk="${entry%%=*}" old_val="${entry#*=}"
                 local group="${gk%%:*}" key="${gk#*:}"
                 sudo kwriteconfig6 --file /etc/xdg/kdeglobals --group "$group" --key "$key" "$old_val" 2>/dev/null || true
+                xdg_removed=true
             done
         fi
     fi
+    [[ "$xdg_removed" == true ]] && _remove_print "system theme defaults (/etc/xdg/kdeglobals)"
 
     # Remove keyboard shortcut from /etc/xdg/kglobalshortcutsrc
     if [[ -f "$xdg_shortcuts" ]] && grep -q "$SHORTCUT_ID" "$xdg_shortcuts" 2>/dev/null; then
         sudo kwriteconfig6 --file "$xdg_shortcuts" --group "services" --group "$SHORTCUT_ID" --key "_launch" --delete
-        echo "Removed system keyboard shortcut"
+        _remove_print "global keyboard shortcut config"
     fi
 
     # Unmask splash service in case we masked it
     if systemctl --user is-enabled plasma-ksplash.service 2>&1 | grep -q "masked"; then
         systemctl --user unmask plasma-ksplash.service 2>/dev/null || true
-        echo "Unmasked plasma-ksplash.service"
     fi
 
     # Remove global installation marker
-    [[ -f "$GLOBAL_INSTALL_MARKER" ]] && sudo rm "$GLOBAL_INSTALL_MARKER" && echo "Removed $GLOBAL_INSTALL_MARKER" || true
+    [[ -f "$GLOBAL_INSTALL_MARKER" ]] && { sudo rm "$GLOBAL_INSTALL_MARKER"; _remove_print "installation marker"; }
 
     systemctl --user daemon-reload
-    echo -e "${GREEN}Remove complete.${RESET}"
+    _spinner_stop
+    msg_ok "Remove complete."
 }
 
 do_status() {
-    echo -e "${BOLD}Service status:${RESET}"
-    if systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-        echo -e "    Running: ${GREEN}yes${RESET}"
-    else
-        echo -e "    Running: ${RED}no${RESET}"
-    fi
-    if systemctl --user is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
-        echo -e "    Enabled: ${GREEN}yes${RESET}"
-    else
-        echo -e "    Enabled: ${RED}no${RESET}"
+    msg_header "Version"
+    echo "  $(gum style --foreground "$CLR_PRIMARY" "gloam v${GLOAM_VERSION}")"
+    
+    # Check for updates
+    local api_url="https://api.github.com/repos/${GLOAM_REPO}/releases/latest"
+    local response
+    response=$(curl -fsSL --max-time 3 "$api_url" 2>/dev/null) || true
+    if [[ -n "$response" ]]; then
+        local remote_tag
+        remote_tag=$(printf '%s' "$response" | grep '"tag_name"' | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+        if [[ -n "$remote_tag" ]]; then
+            local remote_version="${remote_tag#v}"
+            local newest
+            newest=$(printf '%s\n%s\n' "$GLOAM_VERSION" "$remote_version" | sort -V | tail -n1)
+            if [[ "$newest" != "$GLOAM_VERSION" ]]; then
+                echo "  $(gum style --foreground "$CLR_WARNING" "Update available: v${remote_version}")"
+            else
+                echo "  $(gum style --foreground "$CLR_SUCCESS" "Up to date")"
+            fi
+        fi
     fi
 
-    echo ""
-    echo -e "${BOLD}Installation locations:${RESET}"
+    msg_header "Service status"
+    if systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+        echo "    Running: $(gum style --foreground "$CLR_SUCCESS" "yes")"
+    else
+        echo "    Running: $(gum style --foreground "$CLR_ERROR" "no")"
+    fi
+    if systemctl --user is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
+        echo "    Enabled: $(gum style --foreground "$CLR_SUCCESS" "yes")"
+    else
+        echo "    Enabled: $(gum style --foreground "$CLR_ERROR" "no")"
+    fi
+
+    msg_header "Installation locations"
 
     status_check "CLI" "/usr/local/bin/gloam" "${HOME}/.local/bin/gloam" -x
     status_check "Service" "/etc/systemd/user/${SERVICE_NAME}.service" "${HOME}/.config/systemd/user/${SERVICE_NAME}.service" -f
     status_check "Panel widget" "/usr/share/plasma/plasmoids/${PLASMOID_ID}" "${HOME}/.local/share/plasma/plasmoids/${PLASMOID_ID}" -d
-    status_check "Keyboard shortcut" "/usr/share/applications/gloam-toggle.desktop" "${HOME}/.local/share/applications/gloam-toggle.desktop" -f "installed (Meta+Shift+L)"
+    status_check "Keyboard shortcut" "/usr/share/applications/gloam-toggle.desktop" "${HOME}/.local/share/applications/gloam-toggle.desktop" -f "Installed (Meta+Shift+L)"
     status_check "Custom (Light)" "/usr/share/plasma/look-and-feel/org.kde.custom.light" "${HOME}/.local/share/plasma/look-and-feel/org.kde.custom.light" -d
     status_check "Custom (Dark)" "/usr/share/plasma/look-and-feel/org.kde.custom.dark" "${HOME}/.local/share/plasma/look-and-feel/org.kde.custom.dark" -d
 
-    # Show bundled assets in custom themes
-    local custom_light_global="/usr/share/plasma/look-and-feel/org.kde.custom.light"
-    local custom_light_local="${HOME}/.local/share/plasma/look-and-feel/org.kde.custom.light"
-    local custom_dark_global="/usr/share/plasma/look-and-feel/org.kde.custom.dark"
-    local custom_dark_local="${HOME}/.local/share/plasma/look-and-feel/org.kde.custom.dark"
-    local custom_theme_dir=""
-    [[ -d "$custom_light_global" ]] && custom_theme_dir="$custom_light_global"
-    [[ -z "$custom_theme_dir" && -d "$custom_light_local" ]] && custom_theme_dir="$custom_light_local"
+    # Check if any gloam component is installed
+    local has_install=false
+    [[ -f "/usr/local/bin/gloam" ]] && has_install=true
+    [[ -f "${HOME}/.local/bin/gloam" ]] && has_install=true
+    [[ -f "/etc/systemd/user/${SERVICE_NAME}.service" ]] && has_install=true
+    [[ -f "${HOME}/.config/systemd/user/${SERVICE_NAME}.service" ]] && has_install=true
+    [[ -d "/usr/share/plasma/plasmoids/${PLASMOID_ID}" ]] && has_install=true
+    [[ -d "${HOME}/.local/share/plasma/plasmoids/${PLASMOID_ID}" ]] && has_install=true
+    [[ -f "/usr/share/applications/gloam-toggle.desktop" ]] && has_install=true
+    [[ -f "${HOME}/.local/share/applications/gloam-toggle.desktop" ]] && has_install=true
+    [[ -d "/usr/share/plasma/look-and-feel/org.kde.custom.light" ]] && has_install=true
+    [[ -d "${HOME}/.local/share/plasma/look-and-feel/org.kde.custom.light" ]] && has_install=true
+    [[ -f "$CONFIG_FILE" ]] && has_install=true
 
-    if [[ -n "$custom_theme_dir" ]]; then
-        local bundled_assets=()
-        [[ -d "${custom_theme_dir}/contents/colors" ]] && bundled_assets+=("colors")
-        [[ -d "${custom_theme_dir}/contents/icons" ]] && bundled_assets+=("icons")
-        [[ -d "${custom_theme_dir}/contents/cursors" ]] && bundled_assets+=("cursors")
-        [[ -d "${custom_theme_dir}/contents/desktoptheme" ]] && bundled_assets+=("plasma style")
-        [[ -d "${custom_theme_dir}/contents/wallpapers" ]] && bundled_assets+=("wallpapers")
-        [[ -d "${custom_theme_dir}/contents/sddm" ]] && bundled_assets+=("sddm background")
+    if [[ "$has_install" == true ]]; then
+        # Show bundled assets in custom themes
+        local custom_light_global="/usr/share/plasma/look-and-feel/org.kde.custom.light"
+        local custom_light_local="${HOME}/.local/share/plasma/look-and-feel/org.kde.custom.light"
+        local custom_dark_global="/usr/share/plasma/look-and-feel/org.kde.custom.dark"
+        local custom_dark_local="${HOME}/.local/share/plasma/look-and-feel/org.kde.custom.dark"
+        local custom_theme_dir=""
+        [[ -d "$custom_light_global" ]] && custom_theme_dir="$custom_light_global"
+        [[ -z "$custom_theme_dir" && -d "$custom_light_local" ]] && custom_theme_dir="$custom_light_local"
 
-        # Check dark theme sddm too
-        local custom_dark_dir=""
-        [[ -d "$custom_dark_global" ]] && custom_dark_dir="$custom_dark_global"
-        [[ -z "$custom_dark_dir" && -d "$custom_dark_local" ]] && custom_dark_dir="$custom_dark_local"
-        if [[ -n "$custom_dark_dir" && -d "${custom_dark_dir}/contents/sddm" ]] && ! [[ " ${bundled_assets[*]} " == *" sddm background "* ]]; then
-            bundled_assets+=("sddm background")
+        if [[ -n "$custom_theme_dir" ]]; then
+            local bundled_assets=()
+            [[ -d "${custom_theme_dir}/contents/colors" ]] && bundled_assets+=("Colors")
+            [[ -d "${custom_theme_dir}/contents/icons" ]] && bundled_assets+=("Icons")
+            [[ -d "${custom_theme_dir}/contents/cursors" ]] && bundled_assets+=("Cursors")
+            [[ -d "${custom_theme_dir}/contents/desktoptheme" ]] && bundled_assets+=("Plasma style")
+            [[ -d "${custom_theme_dir}/contents/wallpapers" ]] && bundled_assets+=("Wallpapers")
+            [[ -d "${custom_theme_dir}/contents/sddm" ]] && bundled_assets+=("SDDM background")
+
+            # Check dark theme sddm too
+            local custom_dark_dir=""
+            [[ -d "$custom_dark_global" ]] && custom_dark_dir="$custom_dark_global"
+            [[ -z "$custom_dark_dir" && -d "$custom_dark_local" ]] && custom_dark_dir="$custom_dark_local"
+            if [[ -n "$custom_dark_dir" && -d "${custom_dark_dir}/contents/sddm" ]] && ! [[ " ${bundled_assets[*]} " == *" SDDM background "* ]]; then
+                bundled_assets+=("SDDM background")
+            fi
+
+            if [[ ${#bundled_assets[@]} -gt 0 ]]; then
+                local joined
+                joined=$(IFS="  "; echo "${bundled_assets[*]}")
+                echo "  $(gum style --foreground "$CLR_MUTED" "•") Bundled assets: $(gum style --foreground "$CLR_SUCCESS" "$joined")"
+            else
+                echo "  $(gum style --foreground "$CLR_MUTED" "•") Bundled assets: $(gum style --foreground "$CLR_WARNING" "None")"
+            fi
         fi
 
-        if [[ ${#bundled_assets[@]} -gt 0 ]]; then
-            local joined
-            joined=$(IFS=", "; echo "${bundled_assets[*]}")
-            echo -e "    Bundled assets: ${GREEN}${joined}${RESET}"
+        # Check if panel layout is in /etc/skel for new users
+        local skel_panel="/etc/skel/.config/plasma-org.kde.plasma.desktop-appletsrc"
+        if [[ -f "$skel_panel" ]]; then
+            echo "  $(gum style --foreground "$CLR_MUTED" "•") Panel layout: $(gum style --foreground "$CLR_SUCCESS" "In /etc/skel")"
         else
-            echo -e "    Bundled assets: ${YELLOW}none${RESET}"
+            echo "  $(gum style --foreground "$CLR_MUTED" "•") Panel layout: $(gum style --foreground "$CLR_WARNING" "Not in /etc/skel")"
+        fi
+
+        # Check system defaults for new users
+        local xdg_globals="/etc/xdg/kdeglobals"
+        local skel_config="/etc/skel/.config/gloam.conf"
+        local service_link="/etc/systemd/user/default.target.wants/${SERVICE_NAME}.service"
+
+        local sys_defaults_set=false
+        if [[ -f "$xdg_globals" ]]; then
+            local sys_light sys_dark
+            sys_light=$(grep -E "^DefaultLightLookAndFeel=" "$xdg_globals" 2>/dev/null | cut -d= -f2)
+            sys_dark=$(grep -E "^DefaultDarkLookAndFeel=" "$xdg_globals" 2>/dev/null | cut -d= -f2)
+            [[ -n "$sys_light" || -n "$sys_dark" ]] && sys_defaults_set=true
+        fi
+
+        if [[ "$sys_defaults_set" == true && -f "$skel_config" && -L "$service_link" ]]; then
+            echo "  $(gum style --foreground "$CLR_MUTED" "•") New user setup: $(gum style --foreground "$CLR_SUCCESS" "Fully configured")"
+        elif [[ "$sys_defaults_set" == true || -f "$skel_config" || -L "$service_link" ]]; then
+            echo "  $(gum style --foreground "$CLR_MUTED" "•") New user setup: $(gum style --foreground "$CLR_WARNING" "Partially configured")"
+        else
+            echo "  $(gum style --foreground "$CLR_MUTED" "•") New user setup: $(gum style --foreground "$CLR_WARNING" "Not configured")"
         fi
     fi
 
-    # Check if panel layout is in /etc/skel for new users
-    local skel_panel="/etc/skel/.config/plasma-org.kde.plasma.desktop-appletsrc"
-    if [[ -f "$skel_panel" ]]; then
-        echo -e "    Panel layout: ${GREEN}in /etc/skel${RESET}"
-    else
-        echo -e "    Panel layout: ${YELLOW}not in /etc/skel${RESET}"
-    fi
-
-    # Check splash service status
-    if systemctl --user is-enabled plasma-ksplash.service 2>&1 | grep -q "masked"; then
-        echo -e "    Splash screen: ${GREEN}disabled (service masked)${RESET}"
-    else
-        echo -e "    Splash screen: ${YELLOW}enabled${RESET}"
-    fi
-
-    # Check system defaults for new users
-    local xdg_globals="/etc/xdg/kdeglobals"
-    local skel_config="/etc/skel/.config/gloam.conf"
-    local service_link="/etc/systemd/user/default.target.wants/${SERVICE_NAME}.service"
-
-    local sys_defaults_set=false
-    if [[ -f "$xdg_globals" ]]; then
-        local sys_light sys_dark
-        sys_light=$(grep -E "^DefaultLightLookAndFeel=" "$xdg_globals" 2>/dev/null | cut -d= -f2)
-        sys_dark=$(grep -E "^DefaultDarkLookAndFeel=" "$xdg_globals" 2>/dev/null | cut -d= -f2)
-        [[ -n "$sys_light" || -n "$sys_dark" ]] && sys_defaults_set=true
-    fi
-
-    if [[ "$sys_defaults_set" == true && -f "$skel_config" && -L "$service_link" ]]; then
-        echo -e "    New user setup: ${GREEN}fully configured${RESET}"
-    elif [[ "$sys_defaults_set" == true || -f "$skel_config" || -L "$service_link" ]]; then
-        echo -e "    New user setup: ${YELLOW}partially configured${RESET}"
-    else
-        echo -e "    New user setup: ${YELLOW}not configured${RESET}"
-    fi
-
-    echo ""
     local current_laf
     current_laf=$(kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage 2>/dev/null)
     local laf_light laf_dark
     laf_light=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel 2>/dev/null)
     laf_dark=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel 2>/dev/null)
 
-    echo -e "${BOLD}Current mode:${RESET}"
+    msg_header "Current mode"
     if [[ "$current_laf" == "$laf_light" ]]; then
         echo "  ☀️ Light ($(get_friendly_name laf "$current_laf") - $current_laf)"
     elif [[ "$current_laf" == "$laf_dark" ]]; then
@@ -3801,68 +4015,101 @@ do_status() {
         echo "  Unknown ($current_laf)"
     fi
 
-    echo ""
     if [[ -f "$CONFIG_FILE" ]]; then
-        echo -e "${BOLD}Configuration ($CONFIG_FILE):${RESET}"
+        msg_header "Configuration"
+        msg_muted "$CONFIG_FILE"
         # shellcheck source=/dev/null
         source "$CONFIG_FILE"
+        echo ""
         print_config_summary "$LAF_LIGHT" "$LAF_DARK" true
         if [[ -n "${WALLPAPER_BASE:-}" ]]; then
-            echo ""
-            echo "    Wallpaper base: ${WALLPAPER_BASE}"
+            echo "    Wallpaper base: $(gum style --foreground "$CLR_SUCCESS" "${WALLPAPER_BASE}")"
         fi
-    else
-        echo "Configuration: not installed"
+        
+        # Show SDDM themes if configured
+        if [[ -n "${SDDM_LIGHT:-}" || -n "${SDDM_DARK:-}" ]]; then
+            local em_dash
+            em_dash=$(gum style --foreground "$CLR_MUTED" "—")
+            msg_header "SDDM Themes"
+            echo "  ☀️ $([[ -n "${SDDM_LIGHT:-}" ]] && get_friendly_name sddm "${SDDM_LIGHT}" || echo "$em_dash")"
+            echo "  🌙 $([[ -n "${SDDM_DARK:-}" ]] && get_friendly_name sddm "${SDDM_DARK}" || echo "$em_dash")"
+        fi
+        
+        # Show push users if configured
+        if [[ -f "$GLOBAL_INSTALL_MARKER" ]]; then
+            local push_users=""
+            while IFS=: read -r username _ uid _ _ home _; do
+                [[ "$uid" -ge 1000 && "$uid" -lt 60000 && "$home" == /home/* && -d "$home" && "$username" != "$USER" ]] && push_users+="${username}, "
+            done < /etc/passwd
+            push_users="${push_users%, }"
+            if [[ -n "$push_users" ]]; then
+                msg_header "Push Targets"
+                echo "  $(gum style --foreground "$CLR_MUTED" "•") ${push_users}"
+            fi
+        fi
+        
+        # Show last theme switch from log
+        if [[ -f "$LOG_FILE" ]]; then
+            local last_switch
+            last_switch=$(grep "Applying theme:" "$LOG_FILE" 2>/dev/null | tail -1 | sed 's/\[//' | sed 's/\].*//')
+            if [[ -n "$last_switch" ]]; then
+                msg_header "Last Switch"
+                echo "  $(gum style --foreground "$CLR_MUTED" "•") ${last_switch}"
+            fi
+        fi
     fi
 }
 
 show_configure_help() {
-    cat <<EOF
-Usage: $0 configure [options]
-
-Description:
-  Scan themes, save config, enable systemd service, and optionally install helper tools.
-  With no options, runs the full configuration wizard.
-  With options, only reconfigures the specified components.
-
-Options:
-  -c, --colors        Configure color schemes only
-  -k, --kvantum       Configure Kvantum themes only
-  -a, --appstyle      Configure application style (Qt widget style)
-  -g, --gtk           Configure GTK themes only
-  -p, --style         Configure Plasma styles only
-  -d, --decorations   Configure window decorations only
-  -i, --icons         Configure icon themes only
-  -C, --cursors       Configure cursor themes only
-  -S, --splash        Configure splash screens only
-  -l, --login         Configure login screen (SDDM) themes
-  -W, --wallpaper     Configure day/night wallpapers
-  -o, --konsole       Configure Konsole profiles only
-  -s, --script        Configure custom scripts only
-  -w, --widget        Install/reinstall panel widget
-  -K, --shortcut      Install/reinstall keyboard shortcut (Meta+Shift+L)
-  -I, --import <file>  Import an existing gloam.conf and skip interactive setup
-  -e, --export <dir>   Export current gloam.conf to a directory (for use with --import)
-
-Panel Widget:
-  During configuration, if you install the command globally (~/.local/bin),
-  you'll be offered to install a Light/Dark Mode Toggle panel widget. This adds
-  a sun/moon button to your panel for quick theme switching.
-
-Examples:
-  $0 configure              Configure all theme options
-  $0 configure -k -i        Configure only Kvantum and icon themes
-  $0 configure --splash     Configure only splash screens
-  $0 configure --export /path/to/dir
-                            Export config for use on another machine/user
-  $0 configure --import /path/to/gloam.conf
-                            Import config from another machine/user
-EOF
+    echo "$(gum style --foreground "$CLR_MUTED" "Usage:") $(gum style --bold "gloam configure") $(gum style --foreground "$CLR_MUTED" "[options]")"
+    echo ""
+    gum style --foreground "$CLR_MUTED" --italic \
+        "  Scan themes, save config, enable systemd service, and optionally install helper tools." \
+        "  With no options, runs the full configuration wizard." \
+        "  With options, only reconfigures the specified components."
+    echo ""
+    echo "$(gum style --bold --foreground "$CLR_PRIMARY" "Options:")"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-c, --colors")        Configure color schemes only"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-k, --kvantum")       Configure Kvantum themes only"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-a, --appstyle")      Configure application style (Qt widget style)"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-g, --gtk")           Configure GTK themes only"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-p, --style")         Configure Plasma styles only"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-d, --decorations")   Configure window decorations only"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-i, --icons")         Configure icon themes only"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-C, --cursors")       Configure cursor themes only"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-S, --splash")        Configure splash screens only"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-l, --login")         Configure login screen (SDDM) themes"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-W, --wallpaper")     Configure day/night wallpapers"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-o, --konsole")       Configure Konsole profiles only"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-s, --script")        Configure custom scripts only"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-w, --widget")        Install/reinstall panel widget"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-K, --shortcut")      Install/reinstall keyboard shortcut (Meta+Shift+L)"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-I, --import") $(gum style --foreground "$CLR_MUTED" "<file>")   Import an existing gloam.conf and skip interactive setup"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" -- "-e, --export") $(gum style --foreground "$CLR_MUTED" "<dir>")    Export current gloam.conf to a directory"
+    echo ""
+    echo "$(gum style --bold --foreground "$CLR_PRIMARY" "Panel Widget:")"
+    gum style --foreground "$CLR_MUTED" --italic \
+        "  During configuration, if you install the command globally (~/.local/bin)," \
+        "  you'll be offered to install a Light/Dark Mode Toggle panel widget. This adds" \
+        "  a sun/moon button to your panel for quick theme switching."
+    echo ""
+    echo "$(gum style --bold --foreground "$CLR_PRIMARY" "Examples:")"
+    echo "  $(gum style --bold "gloam configure")              Configure all theme options"
+    echo "  $(gum style --bold "gloam configure -k -i")        Configure only Kvantum and icon themes"
+    echo "  $(gum style --bold "gloam configure --splash")     Configure only splash screens"
+    echo "  $(gum style --bold "gloam configure --export") $(gum style --foreground "$CLR_MUTED" "/path/to/dir")"
+    echo "                                Export config for use on another machine/user"
+    echo "  $(gum style --bold "gloam configure --import") $(gum style --foreground "$CLR_MUTED" "/path/to/gloam.conf")"
+    echo "                                Import config from another machine/user"
 }
 
 show_banner() {
-    printf '%b\n' "${BOLD}"
-    cat <<'BANNER'
+    gum style \
+        --foreground "$CLR_PRIMARY" \
+        --bold \
+        --padding "0 1" \
+        --margin "1 0 1 0" \
+        "$(cat <<'BANNER'
            ░██
            ░██
  ░████████ ░██  ░███████   ░██████   ░█████████████
@@ -3873,36 +4120,37 @@ show_banner() {
        ░██
  ░███████
 BANNER
-    printf '%b' "${RESET}"
-    echo ""
-    echo " Syncs Kvantum, GTK, and custom scripts with Plasma 6's"
-    echo " native light/dark (day/night) theme switching - and more."
-    echo
+)"
+    gum style --foreground "$CLR_MUTED" --italic \
+        " Syncs Kvantum, GTK, and custom scripts with Plasma 6's" \
+        " native light/dark (day/night) theme switching — and more."
 }
 
 show_help() {
-    cat <<EOF
-Usage: $0 <command> [options]
-
-Commands:
-  configure    Scan themes, save config, enable systemd service
-  watch        Start the theme monitoring loop (foreground)
-  light        Switch to Light mode (and sync sub-themes)
-  dark         Switch to Dark mode (and sync sub-themes)
-  toggle       Toggle between Light and Dark mode
-  remove       Stop service, remove all installed files and widget
-  status       Show service status and current configuration
-  update       Check for and install the latest version
-  version      Show the installed version
-  help         Show this help message
-
-Run '$0 configure --help' for detailed configuration options.
-EOF
+    echo "$(gum style --foreground "$CLR_MUTED" "Usage:") $(gum style --bold "gloam") $(gum style --foreground "$CLR_MUTED" "<command> [options]")"
+    echo ""
+    echo "$(gum style --bold --foreground "$CLR_PRIMARY" "Commands:")"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" "configure")    Scan themes, save config, enable systemd service"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" "watch")        Start the theme monitoring loop (foreground)"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" "light")        Switch to Light mode (and sync sub-themes)"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" "dark")         Switch to Dark mode (and sync sub-themes)"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" "toggle")       Toggle between Light and Dark mode"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" "remove")       Stop service, remove all installed files and widget"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" "status")       Show service status and current configuration"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" "update")       Check for and install the latest version"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" "version")      Show the installed version"
+    echo "  $(gum style --bold --foreground "$CLR_SECONDARY" "help")         Show this help message"
+    echo ""
+    echo "Run '$(gum style --bold "gloam configure --help")' for detailed configuration options."
 }
 
 # --- MAIN ENTRY POINT ---------------------------------------------------------
 
-show_banner
+# Show banner only for interactive commands
+case "${1:-}" in
+    watch|light|dark|toggle) ;;
+    *) show_banner ;;
+esac
 
 case "${1:-}" in
     configure) do_configure "$@" ;;
@@ -3913,11 +4161,12 @@ case "${1:-}" in
     remove)    do_remove ;;
     status)    do_status ;;
     update)    do_update ;;
-    version|--version|-v) echo "gloam ${GLOAM_VERSION}" ;;
+    version|--version|-v) echo ""; echo "gloam $(gum style --foreground "$CLR_PRIMARY" "v${GLOAM_VERSION}")" ;;
     ""|help|-h|--help) show_help ;;
     *)
-        echo "Usage: $0 <command> [options]"
-        echo "Try '$0 help' for more information."
+        msg_err "Unknown command: ${1:-}"
+        echo "$(gum style --foreground "$CLR_MUTED" "Usage:") $(gum style --bold "gloam") $(gum style --foreground "$CLR_MUTED" "<command> [options]")"
+        echo "Run '$(gum style --bold "gloam help")' for more information."
         exit 1
         ;;
 esac
