@@ -159,23 +159,17 @@ EXPECTED_CONFIG_VARS=(
     INSTALL_CLI INSTALL_WIDGET INSTALL_SHORTCUT
 )
 
-# Run a command with sudo if global install mode, otherwise run directly
-gloam_cmd() {
-    if [[ "$INSTALL_GLOBAL" == true ]]; then
-        sudo "$@"
+# Run a command with sudo if condition is true, otherwise run directly
+maybe_sudo() {
+    if [[ "$1" == true ]]; then
+        sudo "${@:2}"
     else
-        "$@"
+        "${@:2}"
     fi
 }
 
-# Run a command with sudo if THEME_INSTALL_GLOBAL, otherwise run directly
-theme_cmd() {
-    if [[ "${THEME_INSTALL_GLOBAL:-false}" == true ]]; then
-        sudo "$@"
-    else
-        "$@"
-    fi
-}
+gloam_cmd() { maybe_sudo "$INSTALL_GLOBAL" "$@"; }
+theme_cmd() { maybe_sudo "${THEME_INSTALL_GLOBAL:-false}" "$@"; }
 
 # --- PATH HELPERS -------------------------------------------------------------
 
@@ -708,20 +702,7 @@ set_system_defaults() {
                 /etc/skel/.config/plasma-org.kde.plasma.desktop-appletsrc
         fi
 
-        # UX config files (panels, input, window manager, shortcuts, apps, font rendering)
-        local ux_configs=(
-            plasmashellrc
-            kcminputrc
-            kwinrc
-            kglobalshortcutsrc
-            kscreenlockerrc
-            krunnerrc
-            dolphinrc
-            konsolerc
-            breezerc
-            kcmfonts
-        )
-        for cfg in "${ux_configs[@]}"; do
+        for cfg in "${UX_CONFIGS[@]}"; do
             [[ -f "${HOME}/.config/${cfg}" ]] || continue
             track_skel_file "/etc/skel/.config/${cfg}"
             sudo cp "${HOME}/.config/${cfg}" "/etc/skel/.config/${cfg}"
@@ -777,6 +758,15 @@ set_system_defaults() {
     sudo kwriteconfig6 --file /etc/xdg/kglobalshortcutsrc --group "services" --group "$SHORTCUT_ID" --key "_launch" "Meta+Shift+L"
 
     echo -e "${GREEN}System defaults configured for new users.${RESET}"
+}
+
+maybe_sudo_cp() {
+    local use_sudo="$1" src="$2" dest="$3"
+    if [[ "$use_sudo" == true ]]; then
+        sudo cp "$src" "$dest"
+    else
+        cp "$src" "$dest"
+    fi
 }
 
 get_friendly_name() {
@@ -1016,6 +1006,24 @@ img = QImage('${path//\'/\\\'}')
 if not img.isNull():
     print(f'{img.width()}x{img.height()}')
 "
+}
+
+find_largest_image() {
+    local dir="$1"
+    local best_img="" best_pixels=0
+    for img in "${dir}/"*; do
+        [[ -f "$img" ]] || continue
+        local dims
+        dims=$(get_image_dimensions "$img")
+        [[ -z "$dims" ]] && continue
+        local w h
+        w="${dims%x*}"; h="${dims#*x}"
+        if (( w * h > best_pixels )); then
+            best_pixels=$(( w * h ))
+            best_img="$img"
+        fi
+    done
+    echo "$best_img"
 }
 
 resolve_image_paths() {
@@ -1338,14 +1346,12 @@ setup_flatpak_kvantum() {
 apply_gtk_theme() {
     local theme="$1"
 
-    # Update GTK 3 settings
-    mkdir -p "${HOME}/.config/gtk-3.0"
-    sed -i "s/^gtk-theme-name=.*/gtk-theme-name=$theme/" "${HOME}/.config/gtk-3.0/settings.ini" 2>/dev/null || \
-        echo -e "[Settings]\ngtk-theme-name=$theme" >> "${HOME}/.config/gtk-3.0/settings.ini"
-    # Update GTK 4 settings
-    mkdir -p "${HOME}/.config/gtk-4.0"
-    sed -i "s/^gtk-theme-name=.*/gtk-theme-name=$theme/" "${HOME}/.config/gtk-4.0/settings.ini" 2>/dev/null || \
-        echo -e "[Settings]\ngtk-theme-name=$theme" >> "${HOME}/.config/gtk-4.0/settings.ini"
+    # Update GTK settings (3.0 and 4.0)
+    for ver in gtk-3.0 gtk-4.0; do
+        mkdir -p "${HOME}/.config/${ver}"
+        sed -i "s/^gtk-theme-name=.*/gtk-theme-name=$theme/" "${HOME}/.config/${ver}/settings.ini" 2>/dev/null || \
+            echo -e "[Settings]\ngtk-theme-name=$theme" >> "${HOME}/.config/${ver}/settings.ini"
+    done
     # Update via gsettings if available
     command -v gsettings &>/dev/null && gsettings set org.gnome.desktop.interface gtk-theme "$theme" 2>/dev/null || true
 
@@ -1532,33 +1538,9 @@ setup_sddm_wallpaper() {
     fi
 
     # Pick the largest image from the gloam pack for each variant
-    local best_light="" best_dark="" best_pixels=0
-    for img in "${wp_base}/gloam/contents/images/"*; do
-        [[ -f "$img" ]] || continue
-        local dims
-        dims=$(get_image_dimensions "$img")
-        [[ -z "$dims" ]] && continue
-        local w h
-        w="${dims%x*}"; h="${dims#*x}"
-        if (( w * h > best_pixels )); then
-            best_pixels=$(( w * h ))
-            best_light="$img"
-        fi
-    done
-
-    best_pixels=0
-    for img in "${wp_base}/gloam/contents/images_dark/"*; do
-        [[ -f "$img" ]] || continue
-        local dims
-        dims=$(get_image_dimensions "$img")
-        [[ -z "$dims" ]] && continue
-        local w h
-        w="${dims%x*}"; h="${dims#*x}"
-        if (( w * h > best_pixels )); then
-            best_pixels=$(( w * h ))
-            best_dark="$img"
-        fi
-    done
+    local best_light best_dark
+    best_light=$(find_largest_image "${wp_base}/gloam/contents/images")
+    best_dark=$(find_largest_image "${wp_base}/gloam/contents/images_dark")
 
     # Copy images to system-accessible location
     if [[ -n "$best_light" ]]; then
@@ -1978,25 +1960,10 @@ bundle_wallpapers_and_sddm() {
 
         # If SDDM image doesn't exist, create it from the wallpaper pack
         if [[ -z "$sddm_bg" || ! -f "$sddm_bg" ]] && [[ -n "$sddm_wp_base" ]]; then
-            local img_dir
-            if [[ "$variant" == "light" ]]; then
-                img_dir="${sddm_wp_base}/gloam/contents/images"
-            else
-                img_dir="${sddm_wp_base}/gloam/contents/images_dark"
-            fi
-            local best_img="" best_px=0
-            for img in "${img_dir}/"*; do
-                [[ -f "$img" ]] || continue
-                local dims
-                dims=$(get_image_dimensions "$img")
-                [[ -z "$dims" ]] && continue
-                local w h
-                w="${dims%x*}"; h="${dims#*x}"
-                if (( w * h > best_px )); then
-                    best_px=$(( w * h ))
-                    best_img="$img"
-                fi
-            done
+            local img_dir="${sddm_wp_base}/gloam/contents/images"
+            [[ "$variant" == "dark" ]] && img_dir="${sddm_wp_base}/gloam/contents/images_dark"
+            local best_img
+            best_img=$(find_largest_image "$img_dir")
             if [[ -n "$best_img" ]]; then
                 local ext="${best_img##*.}"
                 sudo mkdir -p /usr/local/lib/gloam
@@ -2007,12 +1974,8 @@ bundle_wallpapers_and_sddm() {
 
         [[ -n "$sddm_bg" && -f "$sddm_bg" ]] || continue
 
-        local target_theme_dir
-        if [[ "$variant" == "light" ]]; then
-            target_theme_dir="$theme_dir_light"
-        else
-            target_theme_dir="$theme_dir_dark"
-        fi
+        local target_theme_dir="$theme_dir_light"
+        [[ "$variant" == "dark" ]] && target_theme_dir="$theme_dir_dark"
         [[ -d "$target_theme_dir" ]] || continue
 
         theme_cmd mkdir -p "${target_theme_dir}/contents/sddm"
@@ -3612,6 +3575,24 @@ do_remove() {
 }
 
 do_status() {
+    # Helper for status checks
+    _status_check() {
+        local label="$1" global="$2" local="$3" test_op="$4" extra="${5:-installed}"
+        local global_ok=false local_ok=false
+        case "$test_op" in
+            -f) [[ -f "$global" ]] && global_ok=true; [[ -f "$local" ]] && local_ok=true ;;
+            -d) [[ -d "$global" ]] && global_ok=true; [[ -d "$local" ]] && local_ok=true ;;
+            -x) [[ -x "$global" ]] && global_ok=true; [[ -x "$local" ]] && local_ok=true ;;
+        esac
+        if [[ "$global_ok" == true ]]; then
+            echo -e "    ${label}: ${GREEN}${extra} (global)${RESET}"
+        elif [[ "$local_ok" == true ]]; then
+            echo -e "    ${label}: ${GREEN}${extra} (local)${RESET}"
+        else
+            echo -e "    ${label}: ${YELLOW}not installed${RESET}"
+        fi
+    }
+
     echo -e "${BOLD}Service status:${RESET}"
     if systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
         echo -e "    Running: ${GREEN}yes${RESET}"
@@ -3627,79 +3608,21 @@ do_status() {
     echo ""
     echo -e "${BOLD}Installation locations:${RESET}"
 
-    # CLI location
-    local local_cli="${HOME}/.local/bin/gloam"
-    local global_cli="/usr/local/bin/gloam"
-    if [[ -x "$global_cli" ]]; then
-        echo -e "    CLI: ${GREEN}$global_cli (global)${RESET}"
-    elif [[ -x "$local_cli" ]]; then
-        echo -e "    CLI: ${GREEN}$local_cli (local)${RESET}"
-    else
-        echo -e "    CLI: ${YELLOW}not installed${RESET}"
-    fi
+    _status_check "CLI" "/usr/local/bin/gloam" "${HOME}/.local/bin/gloam" -x
+    _status_check "Service" "/etc/systemd/user/${SERVICE_NAME}.service" "${HOME}/.config/systemd/user/${SERVICE_NAME}.service" -f
+    _status_check "Panel widget" "/usr/share/plasma/plasmoids/${PLASMOID_ID}" "${HOME}/.local/share/plasma/plasmoids/${PLASMOID_ID}" -d
+    _status_check "Keyboard shortcut" "/usr/share/applications/gloam-toggle.desktop" "${HOME}/.local/share/applications/gloam-toggle.desktop" -f "installed (Meta+Shift+L)"
+    _status_check "Custom (Light)" "/usr/share/plasma/look-and-feel/org.kde.custom.light" "${HOME}/.local/share/plasma/look-and-feel/org.kde.custom.light" -d
+    _status_check "Custom (Dark)" "/usr/share/plasma/look-and-feel/org.kde.custom.dark" "${HOME}/.local/share/plasma/look-and-feel/org.kde.custom.dark" -d
 
-    # Service location
-    local local_service="${HOME}/.config/systemd/user/${SERVICE_NAME}.service"
-    local global_service="/etc/systemd/user/${SERVICE_NAME}.service"
-    if [[ -f "$global_service" ]]; then
-        echo -e "    Service: ${GREEN}$global_service (global)${RESET}"
-    elif [[ -f "$local_service" ]]; then
-        echo -e "    Service: ${GREEN}$local_service (local)${RESET}"
-    else
-        echo -e "    Service: ${YELLOW}not installed${RESET}"
-    fi
-
-    # Plasmoid location
-    local local_plasmoid="${HOME}/.local/share/plasma/plasmoids/${PLASMOID_ID}"
-    local global_plasmoid="/usr/share/plasma/plasmoids/${PLASMOID_ID}"
-    if [[ -d "$global_plasmoid" ]]; then
-        echo -e "    Panel widget: ${GREEN}installed (global)${RESET}"
-    elif [[ -d "$local_plasmoid" ]]; then
-        echo -e "    Panel widget: ${GREEN}installed (local)${RESET}"
-    else
-        echo -e "    Panel widget: ${YELLOW}not installed${RESET}"
-    fi
-
-    # Shortcut location
-    local local_shortcut="${HOME}/.local/share/applications/gloam-toggle.desktop"
-    local global_shortcut="/usr/share/applications/gloam-toggle.desktop"
-    if [[ -f "$global_shortcut" ]]; then
-        echo -e "    Keyboard shortcut: ${GREEN}installed (global)${RESET} (Meta+Shift+L)"
-    elif [[ -f "$local_shortcut" ]]; then
-        echo -e "    Keyboard shortcut: ${GREEN}installed (local)${RESET} (Meta+Shift+L)"
-    else
-        echo -e "    Keyboard shortcut: ${YELLOW}not installed${RESET}"
-    fi
-
-    # Check for custom themes
+    # Show bundled assets in custom themes
     local custom_light_global="/usr/share/plasma/look-and-feel/org.kde.custom.light"
     local custom_light_local="${HOME}/.local/share/plasma/look-and-feel/org.kde.custom.light"
     local custom_dark_global="/usr/share/plasma/look-and-feel/org.kde.custom.dark"
     local custom_dark_local="${HOME}/.local/share/plasma/look-and-feel/org.kde.custom.dark"
-
-    if [[ -d "$custom_light_global" ]]; then
-        echo -e "    Custom (Light): ${GREEN}installed (global)${RESET}"
-    elif [[ -d "$custom_light_local" ]]; then
-        echo -e "    Custom (Light): ${GREEN}installed (local)${RESET}"
-    else
-        echo -e "    Custom (Light): ${YELLOW}not installed${RESET}"
-    fi
-
-    if [[ -d "$custom_dark_global" ]]; then
-        echo -e "    Custom (Dark): ${GREEN}installed (global)${RESET}"
-    elif [[ -d "$custom_dark_local" ]]; then
-        echo -e "    Custom (Dark): ${GREEN}installed (local)${RESET}"
-    else
-        echo -e "    Custom (Dark): ${YELLOW}not installed${RESET}"
-    fi
-
-    # Show bundled assets in custom themes
     local custom_theme_dir=""
-    if [[ -d "$custom_light_global" ]]; then
-        custom_theme_dir="$custom_light_global"
-    elif [[ -d "$custom_light_local" ]]; then
-        custom_theme_dir="$custom_light_local"
-    fi
+    [[ -d "$custom_light_global" ]] && custom_theme_dir="$custom_light_global"
+    [[ -z "$custom_theme_dir" && -d "$custom_light_local" ]] && custom_theme_dir="$custom_light_local"
 
     if [[ -n "$custom_theme_dir" ]]; then
         local bundled_assets=()
