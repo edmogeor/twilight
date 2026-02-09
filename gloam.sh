@@ -1073,9 +1073,9 @@ install_plasmoid() {
 
     # Upgrade if already installed, otherwise install fresh
     if kpackagetool6 "${kp_args[@]}" --show "$PLASMOID_ID" &>/dev/null; then
-        gloam_cmd kpackagetool6 "${kp_args[@]}" --upgrade "$plasmoid_src" 2>/dev/null
+        gloam_cmd kpackagetool6 "${kp_args[@]}" --upgrade "$plasmoid_src" >/dev/null 2>&1
     else
-        gloam_cmd kpackagetool6 "${kp_args[@]}" --install "$plasmoid_src" 2>/dev/null
+        gloam_cmd kpackagetool6 "${kp_args[@]}" --install "$plasmoid_src" >/dev/null 2>&1
     fi
 
     echo -e "${GREEN}Installed Light/Dark Mode Toggle widget.${RESET}"
@@ -1145,11 +1145,11 @@ cleanup_stale() {
     local local_service="${HOME}/.config/systemd/user/${SERVICE_NAME}.service"
 
     if systemctl --user is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
-        systemctl --user stop "$SERVICE_NAME"
+        systemctl --user stop "$SERVICE_NAME" 2>/dev/null
         dirty=1
     fi
     if systemctl --user is-enabled --quiet "$SERVICE_NAME" 2>/dev/null; then
-        systemctl --user disable "$SERVICE_NAME"
+        systemctl --user disable "$SERVICE_NAME" 2>/dev/null
         dirty=1
     fi
     [[ -f "$local_service" ]] && rm "$local_service" && dirty=1
@@ -1157,7 +1157,6 @@ cleanup_stale() {
     if [[ "$dirty" -eq 1 ]]; then
         systemctl --user daemon-reload
         echo -e "${GREEN}Cleaned up previous installation.${RESET}"
-        echo ""
     fi
 }
 
@@ -2314,6 +2313,7 @@ do_configure() {
             echo -e "${RED}Error: Config file not found: $IMPORT_CONFIG${RESET}"
             exit 1
         fi
+        echo ""
         echo -e "${BLUE}Importing configuration from ${IMPORT_CONFIG}...${RESET}"
         # shellcheck source=/dev/null
         source "$IMPORT_CONFIG"
@@ -2444,8 +2444,10 @@ do_configure() {
             echo -e "${RED}Error: Imported config is missing theme definitions.${RESET}"
             exit 1
         fi
-        echo -e "  ☀️ Light theme: ${BOLD}$(get_friendly_name laf "$laf_light")${RESET}"
-        echo -e "  🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark")${RESET}"
+        echo ""
+        echo -e "☀️ Light theme: ${BOLD}$(get_friendly_name laf "$laf_light")${RESET}"
+        echo -e "🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark")${RESET}"
+        echo ""
         cleanup_stale
         # Remove app-specific overrides so they follow the global theme
         clean_app_overrides
@@ -2513,8 +2515,9 @@ do_configure() {
             exit 1
         fi
     fi
-    echo -e "  ☀️ Light theme: ${BOLD}$(get_friendly_name laf "$laf_light")${RESET}"
-    echo -e "  🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark")${RESET}"
+    echo -e "☀️ Light theme: ${BOLD}$(get_friendly_name laf "$laf_light")${RESET}"
+    echo -e "🌙 Dark theme:  ${BOLD}$(get_friendly_name laf "$laf_dark")${RESET}"
+    echo ""
 
     if [[ "$laf_light" == "$laf_dark" ]]; then
         echo -e "${RED}Error: ☀️ Light and 🌙 Dark LookAndFeel are the same ($laf_light).${RESET}" >&2
@@ -3474,6 +3477,7 @@ EOF
         if [[ "${INSTALL_CLI:-false}" == true ]]; then
             install_cli_binary
             executable_path="$cli_path"
+            echo ""
             echo -e "${GREEN}Installed to $cli_path${RESET}"
             [[ "${INSTALL_WIDGET:-false}" == true ]] && install_plasmoid
             [[ "${INSTALL_SHORTCUT:-false}" == true ]] && install_shortcut
@@ -3538,11 +3542,12 @@ WantedBy=default.target"
     fi
 
     systemctl --user daemon-reload
-    systemctl --user enable --now "$SERVICE_NAME"
+    systemctl --user enable --now "$SERVICE_NAME" 2>/dev/null
 
     # Enable automatic theme switching in KDE Quick Settings
     kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
 
+    echo ""
     echo -e "${GREEN}Successfully configured and started $SERVICE_NAME.${RESET}"
 
     # Push config to other users if requested
