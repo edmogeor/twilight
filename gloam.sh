@@ -49,7 +49,7 @@ BLUE='\033[38;5;99m'
 RESET='\033[0m'
 
 # Version
-GLOAM_VERSION="1.0.4"
+GLOAM_VERSION="1.1.0"
 GLOAM_REPO="edmogeor/gloam"
 
 
@@ -106,34 +106,38 @@ FONT_KEYS=(
 LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}"
 LOG_FILE="${LOG_DIR}/gloam.log"
 LOG_MAX_SIZE=102400  # 100KB
+GLOAM_DEBUG="${GLOAM_DEBUG:-false}"
 
-log() {
-    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] $*"
-    msg_info "$*"
+_log_write() {
+    local level="$1" message="$2"
     mkdir -p "$LOG_DIR"
-    # Truncate if too large
     if [[ -f "$LOG_FILE" ]] && (( $(stat -c%s "$LOG_FILE" 2>/dev/null || echo 0) > LOG_MAX_SIZE )); then
         tail -n 100 "$LOG_FILE" > "${LOG_FILE}.tmp" && mv "${LOG_FILE}.tmp" "$LOG_FILE"
     fi
-    echo "$msg" >> "$LOG_FILE"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $message" >> "$LOG_FILE"
 }
 
-warn() {
-    local msg="$*"
-    msg_warn "$msg"
-    local ts="[$(date '+%Y-%m-%d %H:%M:%S')] WARN: $msg"
-    mkdir -p "$LOG_DIR"
-    echo "$ts" >> "$LOG_FILE"
+GLOAM_LOG_MODE="pretty"  # "pretty" = gum styled, "raw" = timestamped plain text
+
+_log_print() {
+    local level="$1"; shift
+    if [[ "$GLOAM_LOG_MODE" == "raw" ]]; then
+        echo "[$(date '+%H:%M:%S')] [$level] $*"
+    else
+        case "$level" in
+            INFO)  msg_info "$*" ;;
+            WARN)  msg_warn "$*" ;;
+            ERROR) msg_err "$*" ;;
+            DEBUG) msg_muted "DEBUG: $*" ;;
+        esac
+    fi
 }
 
-die() {
-    local msg="$*"
-    msg_err "$msg"
-    local ts="[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: $msg"
-    mkdir -p "$LOG_DIR"
-    echo "$ts" >> "$LOG_FILE"
-    exit 1
-}
+log()   { _log_write "INFO" "$*"; _log_print INFO "$*"; }
+warn()  { _log_write "WARN" "$*"; _log_print WARN "$*"; }
+error() { _log_write "ERROR" "$*"; _log_print ERROR "$*"; }
+die()   { error "$*"; exit 1; }
+debug() { [[ "$GLOAM_DEBUG" == "true" ]] && { _log_write "DEBUG" "$*"; _log_print DEBUG "$*"; }; }
 
 # Temp file tracking and cleanup
 GLOAM_TMPFILES=()
@@ -157,30 +161,28 @@ trap 'cleanup; exit 130' INT TERM
 
 # --- gum wrapper functions (themed) -----------------------------------------
 
+_gum_check_cancel() {
+    [[ $1 -eq 130 ]] && exit 130
+    return $1
+}
+
 _gum_confirm() {
-    local rc=0
     gum confirm \
         --prompt.foreground "$CLR_PRIMARY" \
         --selected.background "$CLR_PRIMARY" \
         --unselected.foreground "$CLR_MUTED" \
-        "$@" || rc=$?
-    if [[ $rc -eq 130 ]]; then exit 130; fi
-    return $rc
+        "$@" || _gum_check_cancel $?
 }
 
 _gum_choose() {
-    local rc=0
     gum choose \
         --header.foreground "$CLR_PRIMARY" \
         --cursor.foreground "$CLR_SECONDARY" \
         --selected.foreground "$CLR_PRIMARY" \
-        "$@" || rc=$?
-    if [[ $rc -eq 130 ]]; then exit 130; fi
-    return $rc
+        "$@" || _gum_check_cancel $?
 }
 
 _gum_filter() {
-    local rc=0
     gum filter \
         --header.foreground "$CLR_PRIMARY" \
         --indicator.foreground "$CLR_SECONDARY" \
@@ -188,21 +190,16 @@ _gum_filter() {
         --prompt.foreground "$CLR_PRIMARY" \
         --cursor-text.foreground "$CLR_PRIMARY" \
         --selected-indicator.foreground "$CLR_PRIMARY" \
-        "$@" || rc=$?
-    if [[ $rc -eq 130 ]]; then exit 130; fi
-    return $rc
+        "$@" || _gum_check_cancel $?
 }
 
 _gum_input() {
-    local rc=0
     gum input \
         --header.foreground "$CLR_PRIMARY" \
         --cursor.foreground "$CLR_SECONDARY" \
         --prompt.foreground "$CLR_PRIMARY" \
         --placeholder.foreground "$CLR_MUTED" \
-        "$@" || rc=$?
-    if [[ $rc -eq 130 ]]; then exit 130; fi
-    return $rc
+        "$@" || _gum_check_cancel $?
 }
 
 _gum_spin() {
@@ -233,13 +230,12 @@ _spinner_start() {
     _spinner_pid=$!
 }
 _spinner_stop() {
-    if [[ -n "$_spinner_pid" ]]; then
-        kill "$_spinner_pid" 2>/dev/null || true
-        wait "$_spinner_pid" 2>/dev/null || true
-        printf "\r\033[K"
-        tput cnorm 2>/dev/null
-        _spinner_pid=""
-    fi
+    [[ -z "$_spinner_pid" ]] && return
+    kill "$_spinner_pid" 2>/dev/null || true
+    wait "$_spinner_pid" 2>/dev/null || true
+    printf "\r\033[K"
+    tput cnorm 2>/dev/null
+    _spinner_pid=""
 }
 
 _spinner_print() {
@@ -257,17 +253,11 @@ _spinner_print() {
 
 sudo_auth() {
     msg_info "Waiting for sudo authentication..."
-    if sudo -v; then
-        tput cuu1 2>/dev/null
-        tput el 2>/dev/null
-        msg_ok "Sudo authenticated."
-        return 0
-    else
-        tput cuu1 2>/dev/null
-        tput el 2>/dev/null
-        msg_err "Sudo authentication failed."
-        return 1
-    fi
+    local ok=true
+    sudo -v || ok=false
+    tput cuu1 2>/dev/null; tput el 2>/dev/null
+    if $ok; then msg_ok "Sudo authenticated."; return 0
+    else error "Sudo authentication failed."; return 1; fi
 }
 
 # --- Styled message helpers --------------------------------------------------
@@ -425,15 +415,17 @@ install_cli_binary() {
 
 # --- UPDATE LOGIC -------------------------------------------------------------
 
-# Check for updates from GitHub releases and optionally apply them
-# Arguments: $1 = "verbose" to print "already up to date" message
+# Check if a newer version is available on GitHub
+# Sets GLOAM_REMOTE_VERSION if an update is available, returns 0
+# Returns 1 if already up to date or check failed
+# Arguments: $1 = "verbose" to print status messages
 check_for_updates() {
     local verbose="${1:-}"
     local api_url="https://api.github.com/repos/${GLOAM_REPO}/releases/latest"
 
     local response
     response=$(curl -fsSL --max-time 3 "$api_url" 2>/dev/null) || {
-        [[ "$verbose" == "verbose" ]] && msg_muted "Could not check for updates (network error or no releases found)."
+        [[ "$verbose" == "verbose" ]] && debug "Could not check for updates (network error or no releases found)."
         return 1
     }
 
@@ -441,35 +433,42 @@ check_for_updates() {
     remote_tag=$(printf '%s' "$response" | grep '"tag_name"' | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
     [[ -z "$remote_tag" ]] && return 1
 
-    local remote_version="${remote_tag#v}"
+    GLOAM_REMOTE_VERSION="${remote_tag#v}"
 
     # Compare versions: if remote <= current, we're up to date
     local newest
-    newest=$(printf '%s\n%s\n' "$GLOAM_VERSION" "$remote_version" | sort -V | tail -n1)
+    newest=$(printf '%s\n%s\n' "$GLOAM_VERSION" "$GLOAM_REMOTE_VERSION" | sort -V | tail -n1)
     if [[ "$newest" == "$GLOAM_VERSION" ]]; then
-        [[ "$verbose" == "verbose" ]] && msg_ok "Already up to date (v${GLOAM_VERSION})."
         return 1
     fi
 
-    gum style \
-        --foreground "$CLR_PRIMARY" \
-        --border normal \
-        --border-foreground "$CLR_PRIMARY" \
-        --padding "0 2" \
-        "Update available: v${GLOAM_VERSION} → v${remote_version}"
+    return 0
+}
+
+# Download and install an available update
+apply_update() {
+    local api_url="https://api.github.com/repos/${GLOAM_REPO}/releases/latest"
+    local response
+    response=$(curl -fsSL --max-time 3 "$api_url" 2>/dev/null) || {
+        error "Could not fetch release info. Check your network connection."
+        return 1
+    }
 
     local tarball_url
     tarball_url=$(printf '%s' "$response" | grep '"tarball_url"' | sed 's/.*"tarball_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
     if [[ -z "$tarball_url" ]]; then
-        msg_err "Could not find download URL in release. Update manually from https://github.com/${GLOAM_REPO}/releases"
+        error "Could not find download URL in release. Update manually from https://github.com/${GLOAM_REPO}/releases"
         return 1
     fi
+
+    _spinner_start "Downloading v${GLOAM_REMOTE_VERSION}..."
 
     local tmp_dir
     tmp_dir=$(mktemp -d)
 
     if ! curl -fsSL --max-time 30 "$tarball_url" | tar xz -C "$tmp_dir" --strip-components=1; then
-        msg_err "Failed to download update."
+        _spinner_stop
+        error "Failed to download update from ${tarball_url}. Check your network connection or try again later."
         rm -rf "$tmp_dir"
         return 1
     fi
@@ -488,19 +487,24 @@ check_for_updates() {
         local kp_args=(-t Plasma/Applet)
         [[ "$INSTALL_GLOBAL" == true ]] && kp_args+=(--global)
         if kpackagetool6 "${kp_args[@]}" --show "$PLASMOID_ID" &>/dev/null; then
-            gloam_cmd kpackagetool6 "${kp_args[@]}" --upgrade "$tmp_dir/plasmoid" 2>/dev/null
+            gloam_cmd kpackagetool6 "${kp_args[@]}" --upgrade "$tmp_dir/plasmoid" >/dev/null 2>&1
         fi
     fi
 
     rm -rf "$tmp_dir"
 
-    msg_ok "Updated to v${remote_version}"
+    _spinner_stop
+    echo ""
+    msg_ok "Updated to v${GLOAM_REMOTE_VERSION}."
     return 0
 }
 
 do_update() {
+    msg_header "Update"
+
     if [[ ! -f "/usr/local/bin/gloam" ]]; then
-        msg_warn "gloam is not installed globally."
+        warn "gloam is not installed globally."
+        echo ""
         if _gum_confirm "Would you like to install globally?"; then
             INSTALL_GLOBAL=true
         else
@@ -510,7 +514,31 @@ do_update() {
     else
         INSTALL_GLOBAL=true
     fi
-    check_for_updates "verbose"
+
+    _spinner_start "Checking for updates..."
+    if ! check_for_updates; then
+        _spinner_stop
+        msg_ok "Already up to date (v${GLOAM_VERSION})."
+        return 0
+    fi
+    _spinner_stop
+
+    msg_info "Update available: v${GLOAM_VERSION} → v${GLOAM_REMOTE_VERSION}"
+    echo ""
+    _gum_confirm "Update now?" || { msg_muted "Update skipped."; return 0; }
+
+    apply_update || return 1
+
+    if [[ -f "$CONFIG_FILE" ]] && ! check_config_valid; then
+        echo ""
+        warn "Your configuration is outdated after this update."
+        echo ""
+        if _gum_confirm "Reconfigure now?"; then
+            exec "$(get_cli_path)" --no-banner configure
+        else
+            msg_muted "Run 'gloam configure' when ready."
+        fi
+    fi
 }
 
 # --- INSTALLATION (GLOBAL/SYSTEM) ---------------------------------------------
@@ -600,7 +628,7 @@ ask_global_install() {
 
     if _gum_confirm "Install globally?"; then
         if ! sudo_auth; then
-            msg_err "Sudo authentication failed."
+            error "Sudo authentication failed."
             if ! _gum_confirm --default=yes "Continue with local installation?"; then
                 exit 1
             fi
@@ -849,8 +877,8 @@ push_config_to_users() {
         fi
 
         # Enable service for user (will take effect on their next login)
-        sudo -u "$username" systemctl --user daemon-reload 2>/dev/null || log "WARN: Failed to daemon-reload for user: $username (not logged in?)"
-        sudo -u "$username" systemctl --user enable "$SERVICE_NAME" 2>/dev/null || log "WARN: Failed to enable service for user: $username (not logged in?)"
+        sudo -u "$username" systemctl --user daemon-reload 2>/dev/null || warn "Failed to daemon-reload for user: $username (not logged in?)"
+        sudo -u "$username" systemctl --user enable "$SERVICE_NAME" 2>/dev/null || warn "Failed to enable service for user: $username (not logged in?)"
 
     done
     msg_ok "Pushed configuration to selected users"
@@ -874,7 +902,7 @@ push_config_to_users() {
 set_system_defaults() {
     [[ "$SET_SYSTEM_DEFAULTS" != true ]] && return
 
-    msg_info "Setting system defaults for new users..."
+    log "Setting system defaults for new users..."
 
     # Set default light/dark themes in /etc/xdg/kdeglobals
     local xdg_globals="/etc/xdg/kdeglobals"
@@ -1018,7 +1046,7 @@ get_friendly_name() {
 
 show_laf_reminder() {
     msg_header "Global Themes"
-    msg_warn "Make sure your Light and Dark themes are set to your preferred themes."
+    warn "Make sure your Light and Dark themes are set to your preferred themes."
     msg_muted "You can set them in: System Settings > Quick Settings"
 }
 
@@ -1159,39 +1187,30 @@ select_themes() {
         return 1
     fi
 
-    # Build display list, optionally with "None (Disable)" option
     local display_items=()
     [[ "$opts" == *"has_none"* ]] && display_items+=("None (Disable)")
     display_items+=("${items[@]}")
 
-    # Use gum filter for long lists, gum choose for short ones
-    local _gum_select=_gum_choose
-    (( ${#display_items[@]} > 10 )) && _gum_select=_gum_filter
+    local gum_select=_gum_choose
+    (( ${#display_items[@]} > 10 )) && gum_select=_gum_filter
 
-    local light_choice dark_choice light_val dark_val
-    light_choice=$(printf '%s\n' "${display_items[@]}" | "$_gum_select" --header "Select ☀️ LIGHT mode") || return 1
-    dark_choice=$(printf '%s\n' "${display_items[@]}" | "$_gum_select" --header "Select 🌙 DARK mode") || return 1
+    local light_choice dark_choice
+    light_choice=$(printf '%s\n' "${display_items[@]}" | "$gum_select" --header "Select ☀️ LIGHT mode") || return 1
+    dark_choice=$(printf '%s\n' "${display_items[@]}" | "$gum_select" --header "Select 🌙 DARK mode") || return 1
 
-    # Map display name back to id
-    _resolve_id() {
-        local selected="$1"
-        if [[ "$selected" == "None (Disable)" ]]; then
-            echo "None"
-            return
+    local light_val dark_val
+    for choice in "$light_choice" "$dark_choice"; do
+        local val="$choice"
+        if [[ "$choice" == "None (Disable)" ]]; then
+            val="None"
+        else
+            for i in "${!items[@]}"; do
+                [[ "${items[$i]}" == "$choice" ]] && val="${ids[$i]}" && break
+            done
         fi
-        for i in "${!items[@]}"; do
-            if [[ "${items[$i]}" == "$selected" ]]; then
-                echo "${ids[$i]}"
-                return
-            fi
-        done
-        echo "$selected"
-    }
+        [[ "$choice" == "$light_choice" ]] && light_val="$val" || dark_val="$val"
+    done
 
-    light_val=$(_resolve_id "$light_choice")
-    dark_val=$(_resolve_id "$dark_choice")
-
-    # Extract label from prompt (between "Configure " and "?")
     local label
     label=$(echo "$prompt_msg" | sed -n 's/Configure \([^?]*\)?.*/\1/p')
     [[ -n "$label" ]] && label="${label^}" || label="Selection"
@@ -1362,7 +1381,7 @@ install_plasmoid() {
     local plasmoid_src="${script_dir}/plasmoid"
 
     if [[ ! -d "$plasmoid_src" ]]; then
-        msg_err "Plasmoid source not found at $plasmoid_src"
+        error "Plasmoid source not found at $plasmoid_src. Reinstall gloam or run from the project directory."
         return 1
     fi
 
@@ -1422,7 +1441,7 @@ X-KDE-GlobalAccel-CommandShortcut=true"
 
     msg_ok "Keyboard shortcut installed: Meta+Shift+L"
     msg_muted "You can change it in System Settings > Shortcuts > Commands"
-    msg_warn "You may need to log out and back in for the shortcut to take effect."
+    warn "You may need to log out and back in for the shortcut to take effect."
 }
 
 remove_shortcut() {
@@ -1463,7 +1482,7 @@ cleanup_stale() {
 
 check_desktop_environment() {
     if [[ "$XDG_CURRENT_DESKTOP" != *"KDE"* ]]; then
-        die "This script requires KDE Plasma desktop environment."
+        die "KDE Plasma desktop environment is required. Detected: ${XDG_CURRENT_DESKTOP:-unknown}"
     fi
 }
 
@@ -1557,7 +1576,7 @@ check_dependencies() {
         die "Missing dependencies: ${missing_pkgs[*]}"
     fi
 
-    install_packages "$mgr" "${resolved_pkgs[@]}" || die "Failed to install dependencies."
+    install_packages "$mgr" "${resolved_pkgs[@]}" || die "Failed to install dependencies: ${resolved_pkgs[*]}"
     msg_ok "Dependencies installed."
 }
 
@@ -1993,9 +2012,9 @@ bundle_theme_asset() {
     # Re-apply theme after moving to system location
     if [[ "${THEME_INSTALL_GLOBAL:-false}" == true && "$src" != /usr/share/icons/* ]]; then
         if [[ "$asset_type" == "icons" ]]; then
-            "$PLASMA_CHANGEICONS" "$theme_name" >/dev/null 2>&1 || log "WARN: Failed to re-apply icon theme: $theme_name"
+            "$PLASMA_CHANGEICONS" "$theme_name" >/dev/null 2>&1 || warn "Failed to re-apply icon theme: $theme_name"
         else
-            plasma-apply-cursortheme "$theme_name" >/dev/null 2>&1 || log "WARN: Failed to re-apply cursor theme: $theme_name"
+            plasma-apply-cursortheme "$theme_name" >/dev/null 2>&1 || warn "Failed to re-apply cursor theme: $theme_name"
         fi
     fi
 }
@@ -2018,7 +2037,7 @@ generate_custom_theme() {
     done
 
     if [[ -z "$base_theme_dir" ]]; then
-        die "Base theme not found: ${base_theme}"
+        die "Base theme not found: ${base_theme}\nReinstall the theme or run 'gloam configure' to select a new one."
     fi
 
     # Remove existing custom theme and copy base theme
@@ -2049,7 +2068,7 @@ generate_custom_theme() {
 
     # Update metadata.json with new ID and name, preserving original authors
     local author_block author_name author_email original_authors
-    author_block=$(awk '/"Authors"/,/\]/' "${base_theme_dir}/metadata.json" 2>/dev/null) || log "WARN: Could not extract author block from ${base_theme_dir}/metadata.json"
+    author_block=$(awk '/"Authors"/,/\]/' "${base_theme_dir}/metadata.json" 2>/dev/null) || warn "Could not extract author block from ${base_theme_dir}/metadata.json"
     author_name=$(echo "$author_block" | grep -m1 '"Name"[[:space:]]*:' | sed 's/.*"Name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/') || true
     author_email=$(echo "$author_block" | grep -m1 '"Email"[[:space:]]*:' | sed 's/.*"Email"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/') || true
     [[ -z "$author_name" ]] && author_name="Unknown"
@@ -2404,17 +2423,19 @@ apply_theme() {
         log "${mode^} script not executable: $script"
     fi
 
-    dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh 2>/dev/null || log "WARN: dbus forceRefresh signal failed"
+    dbus-send --session --type=signal /KGlobalSettings org.kde.KGlobalSettings.forceRefresh 2>/dev/null || warn "dbus forceRefresh signal failed — open apps may not update until restarted"
     echo "$mode" > "${XDG_RUNTIME_DIR}/gloam-runtime"
     log "Switched to ${MODE} mode"
 }
 
 do_watch() {
+    GLOAM_LOG_MODE="raw"
+
     if [[ ! -f "$CONFIG_FILE" ]]; then
         die "No config found at $CONFIG_FILE. Run configure first."
     fi
     if ! check_config_valid; then
-        log "WARNING: Configuration is outdated or incompatible. Please run 'gloam configure' to reconfigure."
+        warn "Configuration is outdated or incompatible. Please run 'gloam configure' to reconfigure."
     fi
     # shellcheck source=/dev/null
     source "$CONFIG_FILE"
@@ -2443,7 +2464,7 @@ do_watch() {
     apply_theme "$PREV_LAF" true
 
     local last_apply=0
-    inotifywait -m -e moved_to "${HOME}/.config" --include 'kdeglobals' |
+    inotifywait -q -m -e moved_to "${HOME}/.config" --include 'kdeglobals' |
     while read -r; do
         # Debounce: ignore events within 3 seconds of last apply to prevent
         # feedback loop with Plasma's AutomaticLookAndFeel
@@ -2463,12 +2484,15 @@ do_watch() {
 }
 
 check_config_valid() {
-    [[ ! -f "$CONFIG_FILE" ]] && return 0
-    local file_vars expected_vars
-    file_vars=$(grep -oP '^[A-Z_]+(?==)' "$CONFIG_FILE" | sort)
-    expected_vars=$(printf '%s\n' "${EXPECTED_CONFIG_VARS[@]}" | sort)
-    [[ "$file_vars" == "$expected_vars" ]] && return 0
-    return 1
+    local file="${1:-$CONFIG_FILE}"
+    [[ ! -f "$file" ]] && return 0
+    local file_vars
+    file_vars=$(grep -oP '^[A-Z_]+(?==)' "$file" | sort)
+    local var
+    for var in "${EXPECTED_CONFIG_VARS[@]}"; do
+        grep -qx "$var" <<< "$file_vars" || return 1
+    done
+    return 0
 }
 
 load_config_strict() {
@@ -2583,14 +2607,6 @@ do_configure() {
     check_desktop_environment
     check_dependencies
 
-    # Check for updates silently; if updated, re-exec with the new binary
-    if check_for_updates; then
-        local cli_path
-        cli_path="$(get_cli_path)"
-        if [[ -x "$cli_path" ]]; then
-            exec "$cli_path" "$@"
-        fi
-    fi
 
     # Parse modifiers first to know if this is a full or partial configure
     shift # Remove 'configure' from args
@@ -2636,7 +2652,7 @@ do_configure() {
             -e|--export)        EXPORT_REQUESTED=true ;;
             help|-h|--help)     show_configure_help; exit 0 ;;
             *)
-                msg_err "Unknown option: $1"
+                error "Unknown option: $1"
                 msg_muted "Options: -c|--colors -k|--kvantum -a|--appstyle -g|--gtk -p|--style -d|--decorations -i|--icons -C|--cursors -S|--splash -l|--login -W|--wallpaper -o|--konsole -s|--script -w|--widget -K|--shortcut -I|--import <file> -e|--export <dir>"
                 exit 1
                 ;;
@@ -2650,12 +2666,11 @@ do_configure() {
             EXPORT_DIR=$(_gum_input --header "Export directory" --placeholder "/path/to/directory" --width 60) || exit 1
         fi
         if [[ ! -f "$CONFIG_FILE" ]]; then
-            msg_err "No config found at $CONFIG_FILE. Run configure first."
-            exit 1
+            die "No config found at $CONFIG_FILE. Run configure first."
         fi
+        EXPORT_DIR="${EXPORT_DIR%/}"
         if [[ ! -d "$EXPORT_DIR" ]]; then
-            msg_err "Directory not found: $EXPORT_DIR"
-            exit 1
+            die "Directory not found: $EXPORT_DIR"
         fi
         cp "$CONFIG_FILE" "${EXPORT_DIR}/gloam.conf"
         msg_ok "Config exported to ${EXPORT_DIR}/gloam.conf"
@@ -2668,19 +2683,16 @@ do_configure() {
     fi
 
     # Show disclaimer
-    echo ""
     gum style \
         --foreground "$CLR_WARNING" \
-        --border double \
+        --border normal \
         --border-foreground "$CLR_WARNING" \
-        --padding "1 2" \
-        --margin "0" \
-        --bold \
-        "Disclaimer" "" \
-        "gloam modifies Plasma theme settings, system configs, and user files." \
-        "It is recommended to back up your system before proceeding." \
-        "The authors are not responsible for any system issues."
-
+        --padding "0 2" \
+        "⚠ Disclaimer" "" \
+        "  gloam modifies Plasma theme settings, system configs, and user files." \
+        "  It is recommended to back up your system before proceeding." \
+        "  The authors are not responsible for any system issues."
+    echo ""
     _gum_confirm "Continue?" || { msg_muted "Aborted."; exit 0; }
 
     # Handle config import - source the file and skip all interactive questions
@@ -2688,8 +2700,11 @@ do_configure() {
         if [[ ! -f "$IMPORT_CONFIG" ]]; then
             die "Config file not found: $IMPORT_CONFIG"
         fi
+        if ! check_config_valid "$IMPORT_CONFIG"; then
+            die "Imported config is outdated or incompatible. It may be from a different version of gloam."
+        fi
         echo ""
-        msg_info "Importing configuration from ${IMPORT_CONFIG}..."
+        log "Importing configuration from ${IMPORT_CONFIG}..."
         # shellcheck source=/dev/null
         source "$IMPORT_CONFIG"
 
@@ -2804,7 +2819,7 @@ do_configure() {
         # Authenticate sudo if config requires global installation
         if [[ "${INSTALL_GLOBAL:-false}" == true ]]; then
             msg_info "Config requires global installation, requesting sudo..."
-            sudo_auth || { msg_err "Sudo required for global installation."; exit 1; }
+            sudo_auth || die "Sudo required for global installation."
         fi
         # Auto-discover push targets if push was enabled
         if [[ "${PUSH_TO_USERS:-false}" == true ]]; then
@@ -2823,7 +2838,7 @@ do_configure() {
             laf_dark="${LAF_DARK:-}"
         fi
         if [[ -z "$laf_light" || -z "$laf_dark" ]]; then
-            die "Imported config is missing theme definitions."
+            die "Imported config is missing theme definitions (LAF_LIGHT/LAF_DARK). Check that the config file is valid."
         fi
         msg_header "Global Themes"
         echo "  ☀️ $(gum style --bold --foreground "$CLR_PRIMARY" "$(get_friendly_name laf "$laf_light")")"
@@ -2841,14 +2856,14 @@ do_configure() {
         # Authenticate sudo if this is a global installation
         if [[ "$INSTALL_GLOBAL" == true ]]; then
             msg_info "Global installation detected, requesting sudo..."
-            sudo_auth || { msg_err "Sudo required for global installation."; exit 1; }
+            sudo_auth || die "Sudo required for global installation."
         fi
     elif [[ "$configure_all" == true ]]; then
         # Full configuration - ask about global installation first
         ask_global_install
 
         if [[ -f "$CONFIG_FILE" ]]; then
-            msg_warn "Existing configuration found."
+            warn "Existing configuration found."
             if _gum_confirm "Do you want to overwrite it?"; then
                 source "$CONFIG_FILE"
                 cleanup_stale
@@ -2870,7 +2885,7 @@ do_configure() {
     clean_app_overrides
 
     # Read light/dark themes from KDE Quick Settings configuration
-    msg_info "Reading theme configuration from KDE settings..."
+    log "Reading theme configuration from KDE settings..."
     local laf_light laf_dark
     laf_light=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultLightLookAndFeel)
     laf_dark=$(kreadconfig6 --file kdeglobals --group KDE --key DefaultDarkLookAndFeel)
@@ -2900,9 +2915,7 @@ do_configure() {
             laf_light="$resolved"
             BASE_THEME_LIGHT="$resolved"
         else
-            msg_err "KDE is set to use Custom (Light) but the base theme is unknown."
-            msg_muted "Please set your light theme in System Settings > Quick Settings"
-            exit 1
+            die "KDE is set to use Custom (Light) but the base theme is unknown. Set your light theme in System Settings > Quick Settings."
         fi
     fi
     if [[ "$laf_dark" == "org.kde.custom.dark" ]]; then
@@ -2911,9 +2924,7 @@ do_configure() {
             laf_dark="$resolved"
             BASE_THEME_DARK="$resolved"
         else
-            msg_err "KDE is set to use Custom (Dark) but the base theme is unknown."
-            msg_muted "Please set your dark theme in System Settings > Quick Settings"
-            exit 1
+            die "KDE is set to use Custom (Dark) but the base theme is unknown. Set your dark theme in System Settings > Quick Settings."
         fi
     fi
     echo "  ☀️ $(gum style --bold --foreground "$CLR_PRIMARY" "$(get_friendly_name laf "$laf_light")")"
@@ -2964,7 +2975,7 @@ do_configure() {
         gtk_callback() {
             if command -v flatpak &>/dev/null; then
                 setup_flatpak_permissions
-                msg_warn "Flatpak apps may need to be closed and reopened to update theme."
+                warn "Flatpak apps may need to be closed and reopened to update theme."
             fi
         }
         if ! select_themes "Configure GTK/Flatpak themes? (not automatically set by global theme)" scan_gtk_themes GTK "" gtk_callback; then
@@ -3001,8 +3012,7 @@ do_configure() {
             PLASMA_CHANGEICONS=$(find /usr/lib /usr/libexec /usr/lib64 -name "plasma-changeicons" -print -quit 2>/dev/null || true)
         fi
         if [[ -z "$PLASMA_CHANGEICONS" ]]; then
-            msg_err "plasma-changeicons not found."
-            exit 1
+            die "plasma-changeicons not found. Install the plasma-workspace package for your distribution."
         fi
         if ! select_themes "Configure icon themes? (normally automatically set by global theme)" scan_icon_themes ICON; then
             ICON_LIGHT=""
@@ -3037,7 +3047,7 @@ do_configure() {
         done < <(scan_sddm_themes)
 
         if [[ ${#sddm_ids[@]} -eq 0 ]]; then
-            msg_warn "No SDDM themes found in /usr/share/sddm/themes/"
+            warn "No SDDM themes found in /usr/share/sddm/themes/"
             SDDM_LIGHT=""
             SDDM_DARK=""
         else
@@ -3060,8 +3070,8 @@ do_configure() {
 
             # Set up sudoers rule for non-interactive SDDM switching
             if [[ -n "${SDDM_LIGHT:-}" || -n "${SDDM_DARK:-}" ]]; then
-                msg_info "Setting up passwordless sudo for SDDM theme switching..."
-                sudo_auth || { msg_err "Sudo required for SDDM theme switching."; SDDM_LIGHT=""; SDDM_DARK=""; }
+                log "Setting up passwordless sudo for SDDM theme switching..."
+                sudo_auth || { error "Sudo required for SDDM theme switching."; SDDM_LIGHT=""; SDDM_DARK=""; }
                 if [[ -n "${SDDM_LIGHT:-}" || -n "${SDDM_DARK:-}" ]]; then
                     setup_sddm_sudoers
                     msg_ok "SDDM sudoers rule installed."
@@ -3090,7 +3100,7 @@ do_configure() {
         done < <(resolve_image_paths "$wp_light_input")
 
         if [[ ${#wp_light_paths[@]} -eq 0 ]]; then
-            msg_warn "No valid images found for light mode."
+            warn "No valid images found for light mode."
         fi
 
         local wp_dark_input
@@ -3104,7 +3114,7 @@ do_configure() {
         done < <(resolve_image_paths "$wp_dark_input")
 
         if [[ ${#wp_dark_paths[@]} -eq 0 ]]; then
-            msg_warn "No valid images found for dark mode."
+            warn "No valid images found for dark mode."
         fi
 
         if [[ ${#wp_light_paths[@]} -gt 0 && ${#wp_dark_paths[@]} -gt 0 ]]; then
@@ -3126,7 +3136,7 @@ do_configure() {
             _spinner_stop
 
             if _gum_confirm "Set SDDM login background? (requires sudo)"; then
-                sudo_auth || { msg_err "Sudo required for SDDM wallpaper."; }
+                sudo_auth || { error "Sudo required for SDDM wallpaper."; }
                 if sudo -n true 2>/dev/null; then
                     setup_sddm_wallpaper
                     msg_ok "SDDM backgrounds installed."
@@ -3136,7 +3146,7 @@ do_configure() {
 
             WALLPAPER=true
         else
-            msg_warn "Need at least one image for each mode. Skipping wallpaper."
+            warn "Need at least one image for each mode. Skipping wallpaper."
             WALLPAPER=""
         fi
     else
@@ -3180,7 +3190,7 @@ do_configure() {
             --placeholder "Leave empty to skip" \
             --width 60) || true
         if [[ -n "$SCRIPT_LIGHT" && ! -x "$SCRIPT_LIGHT" ]]; then
-            msg_warn "$SCRIPT_LIGHT is not executable"
+            warn "$SCRIPT_LIGHT is not executable"
         fi
 
         SCRIPT_DARK=$(_gum_input \
@@ -3188,7 +3198,7 @@ do_configure() {
             --placeholder "Leave empty to skip" \
             --width 60) || true
         if [[ -n "$SCRIPT_DARK" && ! -x "$SCRIPT_DARK" ]]; then
-            msg_warn "$SCRIPT_DARK is not executable"
+            warn "$SCRIPT_DARK is not executable"
         fi
 
         # Copy scripts globally if global install and script is in user's home
@@ -3242,8 +3252,7 @@ do_configure() {
             custom_themes_exist=true
         else
             # Old config without base themes - need full reconfigure
-            msg_warn "Custom themes exist but base themes are not recorded."
-            msg_muted "Please run a full reconfigure to regenerate custom themes."
+            warn "Custom themes exist but base themes are not recorded. Run 'gloam configure' to regenerate custom themes."
             CUSTOM_THEME_LIGHT=""
             CUSTOM_THEME_DARK=""
         fi
@@ -3263,13 +3272,11 @@ do_configure() {
 
         # Verify base themes still exist
         if ! check_base_theme_exists "$BASE_THEME_LIGHT"; then
-            msg_err "Base theme '$BASE_THEME_LIGHT' is no longer installed."
-            msg_muted "Please reinstall the theme or run a full reconfigure to select a new base theme."
+            error "Base theme '$BASE_THEME_LIGHT' is no longer installed. Reinstall the theme or run 'gloam configure' to select a new one."
             exit 1
         fi
         if ! check_base_theme_exists "$BASE_THEME_DARK"; then
-            msg_err "Base theme '$BASE_THEME_DARK' is no longer installed."
-            msg_muted "Please reinstall the theme or run a full reconfigure to select a new base theme."
+            error "Base theme '$BASE_THEME_DARK' is no longer installed. Reinstall the theme or run 'gloam configure' to select a new one."
             exit 1
         fi
 
@@ -3498,9 +3505,7 @@ EOF
     # Handle widget-only or shortcut-only configuration
     if [[ "$configure_widget" == true || "$configure_shortcut" == true ]] && [[ "$configure_all" == false ]]; then
         if [[ "$installed_previously" == false ]]; then
-            msg_err "Widget and shortcut require the CLI to be installed first."
-            msg_muted "Run 'gloam configure' first."
-            exit 1
+            die "Widget and shortcut require the CLI to be installed first. Run 'gloam configure' first."
         fi
         install_cli_binary
         [[ "$configure_widget" == true ]] && install_plasmoid
@@ -3551,7 +3556,7 @@ EOF
         else
             # Use absolute path of current script
             executable_path=$(readlink -f "$0")
-            msg_warn "The panel widget and keyboard shortcut require the CLI to be installed."
+            warn "The panel widget and keyboard shortcut require the CLI to be installed."
         fi
     else
         executable_path=$(readlink -f "$0")
@@ -3616,7 +3621,7 @@ WantedBy=default.target"
 
     if [[ -z "$is_patched" ]] && command -v nm &>/dev/null; then
         echo ""
-        msg_warn "Standard Qt apps (Dolphin, Kate, etc.) require a patch to refresh themes without restarting."
+        warn "Standard Qt apps (Dolphin, Kate, etc.) require a patch to refresh themes without restarting."
         msg_muted "If you want seamless live-switching, install the forcerefresh patch:"
         msg_muted "  git clone https://github.com/edmogeor/plasma-qt-forcerefresh.git"
         msg_muted "  cd plasma-qt-forcerefresh && ./plasma-integration-patch-manager.sh install"
@@ -3657,13 +3662,15 @@ do_remove() {
         fi
 
         msg_info "Requesting sudo..."
-        sudo_auth || { msg_err "Sudo required to remove global files."; exit 1; }
+        sudo_auth || die "Sudo required to remove global files."
     fi
 
     _spinner_start "Removing gloam..."
 
     # Helper to print removal status
+    local _removed_count=0
     _remove_print() {
+        (( _removed_count++ ))
         _spinner_print "$(msg_muted "Removed: $1")"
     }
 
@@ -3772,22 +3779,22 @@ do_remove() {
     fi
 
     # Remove config and log files
-    [[ -f "$CONFIG_FILE" ]] && { rm "$CONFIG_FILE"; _remove_print "configuration (~/.config/gloam.conf)"; }
-    [[ -f "$LOG_FILE" ]] && { rm "$LOG_FILE"; _remove_print "log file"; }
+    [[ -f "$CONFIG_FILE" ]] && { rm "$CONFIG_FILE"; _remove_print "Configuration (~/.config/gloam.conf)"; }
+    [[ -f "$LOG_FILE" ]] && { rm "$LOG_FILE"; _remove_print "Log file"; }
 
     # Remove service files
     local local_service="${HOME}/.config/systemd/user/${SERVICE_NAME}.service"
-    [[ -f "$local_service" ]] && { rm "$local_service"; _remove_print "user service"; }
-    [[ -L "$global_service_link" ]] && { sudo rm "$global_service_link"; _remove_print "global service autostart"; }
-    [[ -f "$global_service" ]] && { sudo rm "$global_service"; _remove_print "global service (/etc/systemd/user/gloam.service)"; }
+    [[ -f "$local_service" ]] && { rm "$local_service"; _remove_print "User service"; }
+    [[ -L "$global_service_link" ]] && { sudo rm "$global_service_link"; _remove_print "Global service autostart"; }
+    [[ -f "$global_service" ]] && { sudo rm "$global_service"; _remove_print "Global service (/etc/systemd/user/gloam.service)"; }
 
     # Remove CLI
     local local_cli="${HOME}/.local/bin/gloam"
     [[ -f "$local_cli" ]] && { rm "$local_cli"; _remove_print "CLI (~/.local/bin/gloam)"; }
-    [[ -f "$global_cli" ]] && { sudo rm "$global_cli"; _remove_print "CLI (/usr/local/bin/gloam)"; }
+    [[ -f "$global_cli" ]] && { sudo rm "$global_cli"; _remove_print "Global CLI (/usr/local/bin/gloam)"; }
 
     # Remove global scripts
-    [[ -d "$GLOBAL_SCRIPTS_DIR" ]] && { sudo rm -rf "$GLOBAL_SCRIPTS_DIR"; _remove_print "custom scripts"; }
+    [[ -d "$GLOBAL_SCRIPTS_DIR" ]] && { sudo rm -rf "$GLOBAL_SCRIPTS_DIR"; _remove_print "Custom scripts"; }
 
     # Remove SDDM sudoers rule and wrapper script
     [[ -f /etc/sudoers.d/gloam-sddm ]] && { sudo rm /etc/sudoers.d/gloam-sddm; _remove_print "SDDM theme sudoers rule"; }
@@ -3795,10 +3802,10 @@ do_remove() {
     [[ -d /usr/local/lib/gloam ]] && { sudo rm -rf /usr/local/lib/gloam; _remove_print "SDDM background helper"; }
 
     # Remove plasmoid, shortcut, and custom themes
-    if remove_plasmoid; then _remove_print "panel widget"; fi
-    if remove_shortcut; then _remove_print "keyboard shortcut (Meta+Shift+L)"; fi
-    if remove_custom_themes; then _remove_print "custom themes (org.kde.custom.light/dark)"; fi
-    if remove_wallpaper_packs; then _remove_print "wallpaper pack"; fi
+    if remove_plasmoid; then _remove_print "Panel widget"; fi
+    if remove_shortcut; then _remove_print "Keyboard shortcut (Meta+Shift+L)"; fi
+    if remove_custom_themes; then _remove_print "Custom themes (org.kde.custom.light/dark)"; fi
+    if remove_wallpaper_packs; then _remove_print "Wallpaper pack"; fi
 
     # Remove system defaults for new users (only files/dirs gloam created)
     local skel_files_csv="" skel_dirs_csv=""
@@ -3825,7 +3832,7 @@ do_remove() {
             [[ -d "/etc/skel/.local/share/${dir}" ]] && { sudo rm -rf "/etc/skel/.local/share/${dir}"; skel_removed=true; }
         done
     fi
-    [[ "$skel_removed" == true ]] && _remove_print "system defaults (/etc/skel)"
+    [[ "$skel_removed" == true ]] && _remove_print "System defaults (/etc/skel)"
 
     # Remove/restore keys gloam set in /etc/xdg/kdeglobals
     local xdg_removed=false
@@ -3855,12 +3862,12 @@ do_remove() {
             done
         fi
     fi
-    [[ "$xdg_removed" == true ]] && _remove_print "system theme defaults (/etc/xdg/kdeglobals)"
+    [[ "$xdg_removed" == true ]] && _remove_print "System theme defaults (/etc/xdg/kdeglobals)"
 
     # Remove keyboard shortcut from /etc/xdg/kglobalshortcutsrc
     if [[ -f "$xdg_shortcuts" ]] && grep -q "$SHORTCUT_ID" "$xdg_shortcuts" 2>/dev/null; then
         sudo kwriteconfig6 --file "$xdg_shortcuts" --group "services" --group "$SHORTCUT_ID" --key "_launch" --delete
-        _remove_print "global keyboard shortcut config"
+        _remove_print "Global keyboard shortcut config"
     fi
 
     # Unmask splash service in case we masked it
@@ -3869,11 +3876,16 @@ do_remove() {
     fi
 
     # Remove global installation marker
-    [[ -f "$GLOBAL_INSTALL_MARKER" ]] && { sudo rm "$GLOBAL_INSTALL_MARKER"; _remove_print "installation marker"; }
+    [[ -f "$GLOBAL_INSTALL_MARKER" ]] && { sudo rm "$GLOBAL_INSTALL_MARKER"; _remove_print "Installation marker"; }
 
     systemctl --user daemon-reload
     _spinner_stop
-    msg_ok "Remove complete."
+    echo ""
+    if (( _removed_count > 0 )); then
+        msg_ok "Remove complete."
+    else
+        msg_muted "Nothing to remove."
+    fi
 }
 
 do_status() {
@@ -4146,9 +4158,10 @@ show_help() {
 
 # --- MAIN ENTRY POINT ---------------------------------------------------------
 
-# Show banner only for interactive commands
+# Show banner only for interactive commands (--no-banner used by internal re-exec)
 case "${1:-}" in
     watch|light|dark|toggle) ;;
+    --no-banner) shift ;;
     *) show_banner ;;
 esac
 
@@ -4164,7 +4177,7 @@ case "${1:-}" in
     version|--version|-v) echo ""; echo "gloam $(gum style --foreground "$CLR_PRIMARY" "v${GLOAM_VERSION}")" ;;
     ""|help|-h|--help) show_help ;;
     *)
-        msg_err "Unknown command: ${1:-}"
+        error "Unknown command: ${1:-}"
         echo "$(gum style --foreground "$CLR_MUTED" "Usage:") $(gum style --bold "gloam") $(gum style --foreground "$CLR_MUTED" "<command> [options]")"
         echo "Run '$(gum style --bold "gloam help")' for more information."
         exit 1

@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.1.0] - 2026-02-09
+
+### Added
+- Full TUI overhaul using [gum](https://github.com/charmbracelet/gum) — styled prompts, confirmations, spinners, and coloured output throughout
+- ASCII art banner displayed on all subcommands
+- Automatic dependency installation with package manager detection (pacman, apt, dnf, zypper)
+- `error()` log level for non-fatal errors (logged + displayed, without exiting)
+- `debug()` log level gated behind `GLOAM_DEBUG=true`
+- Version and update check shown in `gloam status` output
+- SDDM themes, push targets, and last switch time shown in `gloam status`
+- Watch mode (`gloam watch`) uses timestamped log-style output for consistency
+
+### Changed
+- Unified logging: all `warn`, `error`, and `die` calls now write to both the log file and the terminal consistently
+- Verbose error messages with actionable guidance (e.g. which package to install, how to recover)
+- Folded follow-up hints into error/warn messages so they are captured in the log file
+- Capitalized all removal status messages for consistency
+- Replaced jq dependency with pure bash JSON parsing
+- Suppress inotifywait noise in watch mode (`-q` flag)
+- Standardized capitalization across all status and removal messages
+- Import/export now prompts for paths when not provided as arguments
+
+### Fixed
+- Warnings and errors during configure/watch were displayed but not written to the log file
+- `log "WARNING: ..."` embedded level in message text instead of using `warn()`
+
 ## [1.0.4] - 2026-02-09
 
 ### Changed
