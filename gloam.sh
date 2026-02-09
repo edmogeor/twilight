@@ -929,6 +929,65 @@ scan_app_styles() {
     python3 -c "from PyQt6.QtWidgets import QStyleFactory; print('\n'.join(sorted(set(QStyleFactory.keys()))))"
 }
 
+select_themes() {
+    local prompt_msg="$1" scan_cmd="$2" var_prefix="$3" opts="${4:-}" callback="${5:-}"
+    
+    echo ""
+    local choice
+    read -rp "$prompt_msg [y/N]: " choice
+    [[ "$choice" =~ ^[Yy]$ ]] || return 1
+    
+    echo "Scanning..."
+    local items=() ids=()
+    if [[ "$opts" == *"id_name"* ]]; then
+        while IFS='|' read -r id name; do
+            [[ -n "$id" ]] || continue
+            ids+=("$id")
+            items+=("$name")
+        done < <($scan_cmd)
+    else
+        mapfile -t items < <($scan_cmd)
+        ids=("${items[@]}")
+    fi
+    
+    if [[ ${#items[@]} -eq 0 ]]; then
+        echo "None found, skipping."
+        return 1
+    fi
+    
+    echo ""
+    echo -e "${BOLD}Available:${RESET}"
+    [[ "$opts" == *"has_none"* ]] && printf "  ${BLUE}%3d)${RESET} %s\n" "0" "None (Disable)"
+    for i in "${!items[@]}"; do
+        printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${items[$i]}"
+    done
+    
+    local light_val dark_val
+    echo ""
+    read -rp "Select ☀️ LIGHT mode [0-${#items[@]}]: " choice
+    if [[ "$choice" == "0" && "$opts" == *"has_none"* ]]; then
+        light_val="None"
+    elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#items[@]} )); then
+        light_val="${ids[$((choice - 1))]}"
+    else
+        return 1
+    fi
+    
+    read -rp "Select 🌙 DARK mode [0-${#items[@]}]: " choice
+    if [[ "$choice" == "0" && "$opts" == *"has_none"* ]]; then
+        dark_val="None"
+    elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#items[@]} )); then
+        dark_val="${ids[$((choice - 1))]}"
+    else
+        return 1
+    fi
+    
+    printf -v "${var_prefix}_LIGHT" '%s' "$light_val"
+    printf -v "${var_prefix}_DARK" '%s' "$dark_val"
+    [[ -n "$callback" ]] && $callback
+    return 0
+}
+
 get_image_dimensions() {
     local path="$1"
     python3 -c "
@@ -2525,418 +2584,101 @@ do_configure() {
 
     # Select Color Schemes
     if [[ "$configure_all" == true || "$configure_colors" == true ]]; then
-    echo ""
-    local choice
-    read -rp "Configure color schemes? (normally automatically set by global theme) [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo "Scanning for color schemes..."
-        mapfile -t color_schemes < <(scan_color_schemes)
-
-        if [[ ${#color_schemes[@]} -eq 0 ]]; then
-            echo "No color schemes found, skipping."
+        if ! select_themes "Configure color schemes? (normally automatically set by global theme)" scan_color_schemes COLOR; then
             COLOR_LIGHT=""
             COLOR_DARK=""
-        else
-            echo ""
-            echo -e "${BOLD}Available color schemes:${RESET}"
-            for i in "${!color_schemes[@]}"; do
-                printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${color_schemes[$i]}"
-            done
-
-            echo ""
-            read -rp "Select ☀️ LIGHT mode color scheme [1-${#color_schemes[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#color_schemes[@]} )); then
-                COLOR_LIGHT="${color_schemes[$((choice - 1))]}"
-
-                read -rp "Select 🌙 DARK mode color scheme [1-${#color_schemes[@]}]: " choice
-                if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#color_schemes[@]} )); then
-                    COLOR_DARK="${color_schemes[$((choice - 1))]}"
-                else
-                    COLOR_LIGHT=""
-                    COLOR_DARK=""
-                fi
-            else
-                COLOR_LIGHT=""
-                COLOR_DARK=""
-            fi
         fi
-    else
-        COLOR_LIGHT=""
-        COLOR_DARK=""
-    fi
     fi
 
     # Select Kvantum themes
     if [[ "$configure_all" == true || "$configure_kvantum" == true ]]; then
-    echo ""
-    read -rp "Configure Kvantum themes? (not automatically set by global theme) [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo "Scanning for Kvantum themes..."
-        mapfile -t themes < <(scan_kvantum_themes)
-
-        if [[ ${#themes[@]} -eq 0 ]]; then
-            echo "No Kvantum themes found, skipping."
+        kvantum_flatpak_callback() {
+            if command -v flatpak &>/dev/null; then
+                setup_flatpak_permissions
+                setup_flatpak_kvantum
+                echo -e "${YELLOW}Note:${RESET} Flatpak apps may need to be closed and reopened to update theme."
+            fi
+        }
+        if ! select_themes "Configure Kvantum themes? (not automatically set by global theme)" scan_kvantum_themes KVANTUM "" kvantum_flatpak_callback; then
             KVANTUM_LIGHT=""
             KVANTUM_DARK=""
-        else
-            echo ""
-            echo -e "${BOLD}Available Kvantum themes:${RESET}"
-            for i in "${!themes[@]}"; do
-                printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${themes[$i]}"
-            done
-
-            echo ""
-            read -rp "Select ☀️ LIGHT mode Kvantum theme [1-${#themes[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#themes[@]} )); then
-                KVANTUM_LIGHT="${themes[$((choice - 1))]}"
-
-                read -rp "Select 🌙 DARK mode Kvantum theme [1-${#themes[@]}]: " choice
-                if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#themes[@]} )); then
-                    KVANTUM_DARK="${themes[$((choice - 1))]}"
-                    if command -v flatpak &>/dev/null; then
-                        setup_flatpak_permissions
-                        setup_flatpak_kvantum
-                        echo -e "${YELLOW}Note:${RESET} Flatpak apps may need to be closed and reopened to update theme."
-                    fi
-                else
-                    KVANTUM_LIGHT=""
-                    KVANTUM_DARK=""
-                fi
-            else
-                KVANTUM_LIGHT=""
-                KVANTUM_DARK=""
-            fi
         fi
-    else
-        KVANTUM_LIGHT=""
-        KVANTUM_DARK=""
-    fi
     fi
 
     # Select Application Style (Qt widget style)
     if [[ "$configure_all" == true || "$configure_appstyle" == true ]]; then
-    echo ""
-    read -rp "Configure application style? (normally automatically set by global theme) [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo "Scanning for application styles..."
-        local app_style_names=()
-        while IFS= read -r name; do
-            app_style_names+=("$name")
-        done < <(scan_app_styles)
-
-        if [[ ${#app_style_names[@]} -eq 0 ]]; then
-            echo -e "${YELLOW}No application styles found.${RESET}"
+        if ! select_themes "Configure application style? (normally automatically set by global theme)" scan_app_styles APPSTYLE; then
             APPSTYLE_LIGHT=""
             APPSTYLE_DARK=""
-        else
-            echo ""
-            echo -e "${BOLD}Available application styles:${RESET}"
-            for i in "${!app_style_names[@]}"; do
-                printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${app_style_names[$i]}"
-            done
-
-            echo ""
-            read -rp "Select ☀️ LIGHT mode application style [1-${#app_style_names[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#app_style_names[@]} )); then
-                APPSTYLE_LIGHT="${app_style_names[$((choice - 1))]}"
-            else
-                APPSTYLE_LIGHT=""
-            fi
-
-            read -rp "Select 🌙 DARK mode application style [1-${#app_style_names[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#app_style_names[@]} )); then
-                APPSTYLE_DARK="${app_style_names[$((choice - 1))]}"
-            else
-                APPSTYLE_DARK=""
-            fi
         fi
-    else
-        APPSTYLE_LIGHT=""
-        APPSTYLE_DARK=""
-    fi
     fi
 
     # Select GTK/Flatpak themes
     if [[ "$configure_all" == true || "$configure_gtk" == true ]]; then
-    echo ""
-    read -rp "Configure GTK/Flatpak themes? (not automatically set by global theme) [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo "Scanning for GTK themes..."
-        mapfile -t gtk_themes < <(scan_gtk_themes)
-
-        if [[ ${#gtk_themes[@]} -eq 0 ]]; then
-            echo "No GTK themes found, skipping."
+        gtk_callback() {
+            if command -v flatpak &>/dev/null; then
+                setup_flatpak_permissions
+                echo -e "${YELLOW}Note:${RESET} Flatpak apps may need to be closed and reopened to update theme."
+            fi
+        }
+        if ! select_themes "Configure GTK/Flatpak themes? (not automatically set by global theme)" scan_gtk_themes GTK "" gtk_callback; then
             GTK_LIGHT=""
             GTK_DARK=""
-        else
-            echo ""
-            echo -e "${BOLD}Available GTK themes:${RESET}"
-            for i in "${!gtk_themes[@]}"; do
-                printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${gtk_themes[$i]}"
-            done
-
-            echo ""
-            read -rp "Select ☀️ LIGHT mode GTK theme [1-${#gtk_themes[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#gtk_themes[@]} )); then
-                GTK_LIGHT="${gtk_themes[$((choice - 1))]}"
-
-                read -rp "Select 🌙 DARK mode GTK theme [1-${#gtk_themes[@]}]: " choice
-                if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#gtk_themes[@]} )); then
-                    GTK_DARK="${gtk_themes[$((choice - 1))]}"
-                    if command -v flatpak &>/dev/null; then
-                        setup_flatpak_permissions
-                        echo -e "${YELLOW}Note:${RESET} Flatpak apps may need to be closed and reopened to update theme."
-                    fi
-                else
-                    GTK_LIGHT=""
-                    GTK_DARK=""
-                fi
-            else
-                GTK_LIGHT=""
-                GTK_DARK=""
-            fi
         fi
-    else
-        GTK_LIGHT=""
-        GTK_DARK=""
-    fi
     fi
 
     # Select Plasma Styles
     if [[ "$configure_all" == true || "$configure_style" == true ]]; then
-    echo ""
-    read -rp "Configure Plasma styles? (normally automatically set by global theme) [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo "Scanning for Plasma styles..."
-        local style_ids=()
-        mapfile -t style_ids < <(scan_plasma_styles)
-
-        if [[ ${#style_ids[@]} -eq 0 ]]; then
-            echo "No Plasma styles found, skipping."
+        if ! select_themes "Configure Plasma styles? (normally automatically set by global theme)" scan_plasma_styles STYLE; then
             STYLE_LIGHT=""
             STYLE_DARK=""
-        else
-            echo ""
-            echo -e "${BOLD}Available Plasma styles:${RESET}"
-            for i in "${!style_ids[@]}"; do
-                printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${style_ids[$i]}"
-            done
-
-            echo ""
-            read -rp "Select ☀️ LIGHT mode Plasma style [1-${#style_ids[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#style_ids[@]} )); then
-                STYLE_LIGHT="${style_ids[$((choice - 1))]}"
-
-                read -rp "Select 🌙 DARK mode Plasma style [1-${#style_ids[@]}]: " choice
-                if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#style_ids[@]} )); then
-                    STYLE_DARK="${style_ids[$((choice - 1))]}"
-                else
-                    STYLE_LIGHT=""
-                    STYLE_DARK=""
-                fi
-            else
-                STYLE_LIGHT=""
-                STYLE_DARK=""
-            fi
         fi
-    else
-        STYLE_LIGHT=""
-        STYLE_DARK=""
-    fi
     fi
 
     # Select Window Decorations
     if [[ "$configure_all" == true || "$configure_decorations" == true ]]; then
-    echo ""
-    read -rp "Configure window decorations? (normally automatically set by global theme) [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo "Scanning for window decorations..."
-        local decoration_ids=() decoration_names=()
-        while IFS='|' read -r id name; do
-            decoration_ids+=("$id")
-            decoration_names+=("$name")
-        done < <(scan_window_decorations)
-
-        if [[ ${#decoration_ids[@]} -eq 0 ]]; then
-            echo "No window decorations found, skipping."
+        if ! select_themes "Configure window decorations? (normally automatically set by global theme)" scan_window_decorations DECORATION "id_name"; then
             DECORATION_LIGHT=""
             DECORATION_DARK=""
-        else
-            echo ""
-            echo -e "${BOLD}Available window decorations:${RESET}"
-            for i in "${!decoration_names[@]}"; do
-                printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${decoration_names[$i]}"
-            done
-
-            echo ""
-            read -rp "Select ☀️ LIGHT mode window decoration [1-${#decoration_ids[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#decoration_ids[@]} )); then
-                DECORATION_LIGHT="${decoration_ids[$((choice - 1))]}"
-
-                read -rp "Select 🌙 DARK mode window decoration [1-${#decoration_ids[@]}]: " choice
-                if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#decoration_ids[@]} )); then
-                    DECORATION_DARK="${decoration_ids[$((choice - 1))]}"
-                else
-                    DECORATION_LIGHT=""
-                    DECORATION_DARK=""
-                fi
-            else
-                DECORATION_LIGHT=""
-                DECORATION_DARK=""
-            fi
         fi
-    else
-        DECORATION_LIGHT=""
-        DECORATION_DARK=""
-    fi
     fi
 
     # Select icon themes
     if [[ "$configure_all" == true || "$configure_icons" == true ]]; then
-    echo ""
-    read -rp "Configure icon themes? (normally automatically set by global theme) [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        # Check common locations first
         for path in /usr/lib/plasma-changeicons /usr/libexec/plasma-changeicons /usr/lib64/plasma-changeicons; do
             if [[ -x "$path" ]]; then
                 PLASMA_CHANGEICONS="$path"
                 break
             fi
         done
-        # Fallback to find if not found
         if [[ -z "${PLASMA_CHANGEICONS:-}" ]]; then
             PLASMA_CHANGEICONS=$(find /usr/lib /usr/libexec /usr/lib64 -name "plasma-changeicons" -print -quit 2>/dev/null || true)
         fi
-
         if [[ -z "$PLASMA_CHANGEICONS" ]]; then
             echo "Error: plasma-changeicons not found." >&2
             exit 1
         fi
-        echo "Scanning for icon themes..."
-        mapfile -t icon_themes < <(scan_icon_themes)
-
-        if [[ ${#icon_themes[@]} -eq 0 ]]; then
-            echo "No icon themes found, skipping."
+        if ! select_themes "Configure icon themes? (normally automatically set by global theme)" scan_icon_themes ICON; then
             ICON_LIGHT=""
             ICON_DARK=""
-        else
-            echo ""
-            echo -e "${BOLD}Available icon themes:${RESET}"
-            for i in "${!icon_themes[@]}"; do
-                printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${icon_themes[$i]}"
-            done
-
-            echo ""
-            read -rp "Select ☀️ LIGHT mode icon theme [1-${#icon_themes[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#icon_themes[@]} )); then
-                ICON_LIGHT="${icon_themes[$((choice - 1))]}"
-
-                read -rp "Select 🌙 DARK mode icon theme [1-${#icon_themes[@]}]: " choice
-                if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#icon_themes[@]} )); then
-                    ICON_DARK="${icon_themes[$((choice - 1))]}"
-                else
-                    ICON_LIGHT=""
-                    ICON_DARK=""
-                fi
-            else
-                ICON_LIGHT=""
-                ICON_DARK=""
-            fi
+            PLASMA_CHANGEICONS=""
         fi
-    else
-        ICON_LIGHT=""
-        ICON_DARK=""
-        PLASMA_CHANGEICONS=""
-    fi
     fi
 
     # Select Cursor themes
     if [[ "$configure_all" == true || "$configure_cursors" == true ]]; then
-    echo ""
-    read -rp "Configure cursor themes? (normally automatically set by global theme) [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo "Scanning for cursor themes..."
-        local cursor_ids=() cursor_names=()
-        while IFS='|' read -r id name; do
-            cursor_ids+=("$id")
-            cursor_names+=("$name")
-        done < <(scan_cursor_themes)
-
-        if [[ ${#cursor_ids[@]} -eq 0 ]]; then
-            echo "No cursor themes found, skipping."
+        if ! select_themes "Configure cursor themes? (normally automatically set by global theme)" scan_cursor_themes CURSOR "id_name"; then
             CURSOR_LIGHT=""
             CURSOR_DARK=""
-        else
-            echo ""
-            echo -e "${BOLD}Available cursor themes:${RESET}"
-            for i in "${!cursor_names[@]}"; do
-                printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${cursor_names[$i]}"
-            done
-
-            echo ""
-            read -rp "Select ☀️ LIGHT mode cursor theme [1-${#cursor_ids[@]}]: " choice
-            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#cursor_ids[@]} )); then
-                CURSOR_LIGHT="${cursor_ids[$((choice - 1))]}"
-
-                read -rp "Select 🌙 DARK mode cursor theme [1-${#cursor_ids[@]}]: " choice
-                if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#cursor_ids[@]} )); then
-                    CURSOR_DARK="${cursor_ids[$((choice - 1))]}"
-                else
-                    CURSOR_LIGHT=""
-                    CURSOR_DARK=""
-                fi
-            else
-                CURSOR_LIGHT=""
-                CURSOR_DARK=""
-            fi
         fi
-    else
-        CURSOR_LIGHT=""
-        CURSOR_DARK=""
-    fi
     fi
 
     # Select Splash Screens
     if [[ "$configure_all" == true || "$configure_splash" == true ]]; then
-    echo ""
-    read -rp "Configure splash screen override? (normally automatically set by global theme) [y/N]: " choice
-    if [[ "$choice" =~ ^[Yy]$ ]]; then
-        echo "Scanning for splash themes..."
-        local splash_ids=() splash_names=()
-        while IFS='|' read -r id name; do
-            splash_ids+=("$id")
-            splash_names+=("$name")
-        done < <(scan_splash_themes)
-
-        echo ""
-        echo -e "${BOLD}Available splash themes:${RESET}"
-        printf "  ${BLUE}%3d)${RESET} %s\n" "0" "None (Disable splash screen)"
-        for i in "${!splash_names[@]}"; do
-            printf "  ${BLUE}%3d)${RESET} %s\n" "$((i + 1))" "${splash_names[$i]}"
-        done
-
-        echo ""
-        read -rp "Select ☀️ LIGHT mode splash theme [0-${#splash_ids[@]}]: " choice
-        if [[ "$choice" == "0" ]]; then
-            SPLASH_LIGHT="None"
-        elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#splash_ids[@]} )); then
-            SPLASH_LIGHT="${splash_ids[$((choice - 1))]}"
-        else
+        if ! select_themes "Configure splash screen override? (normally automatically set by global theme)" scan_splash_themes SPLASH "id_name has_none"; then
             SPLASH_LIGHT=""
-        fi
-
-        read -rp "Select 🌙 DARK mode splash theme [0-${#splash_ids[@]}]: " choice
-        if [[ "$choice" == "0" ]]; then
-            SPLASH_DARK="None"
-        elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#splash_ids[@]} )); then
-            SPLASH_DARK="${splash_ids[$((choice - 1))]}"
-        else
             SPLASH_DARK=""
         fi
-    else
-        SPLASH_LIGHT=""
-        SPLASH_DARK=""
-    fi
     fi
 
     # Select Login Screen (SDDM) Themes
