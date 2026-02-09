@@ -34,8 +34,16 @@ SELECTED_USERS=()
 # Global installation marker file
 GLOBAL_INSTALL_MARKER="/etc/gloam.admin"
 
-# Keys added by gloam to /etc/xdg/kdeglobals (populated during install, read during removal)
+# Keys added/overwritten by gloam in /etc/xdg/kdeglobals (populated during install, read during removal)
 XDG_KEYS_ADDED=()
+XDG_KEYS_OVERWRITTEN=()
+
+# Skel files/dirs created by gloam (populated during install, read during removal)
+SKEL_FILES_CREATED=()
+SKEL_DIRS_CREATED=()
+
+# Previous Flatpak override values (populated during install, read during removal)
+FLATPAK_PREV_OVERRIDES=()
 
 # Global scripts directory
 GLOBAL_SCRIPTS_DIR="/usr/local/share/gloam"
@@ -305,26 +313,57 @@ check_existing_global_install() {
     return 1
 }
 
-# Write a key to /etc/xdg/kdeglobals, tracking newly added keys for clean removal
+# Write a key to /etc/xdg/kdeglobals, tracking new and overwritten keys for clean removal/restore
 write_xdg_default() {
     local file="$1" group="$2" key="$3" value="$4"
     local existing
     existing=$(sudo kreadconfig6 --file "$file" --group "$group" --key "$key" 2>/dev/null) || true
-    [[ -z "$existing" ]] && XDG_KEYS_ADDED+=("${group}:${key}")
+    if [[ -z "$existing" ]]; then
+        XDG_KEYS_ADDED+=("${group}:${key}")
+    else
+        XDG_KEYS_OVERWRITTEN+=("${group}:${key}=${existing}")
+    fi
     sudo kwriteconfig6 --file "$file" --group "$group" --key "$key" "$value"
+}
+
+# Track /etc/skel/.config/ file before copying — only records files gloam creates (not pre-existing)
+track_skel_file() {
+    local path="$1"
+    [[ -f "$path" ]] || SKEL_FILES_CREATED+=("$(basename "$path")")
+}
+
+# Track /etc/skel/ directory before copying — only records dirs gloam creates (not pre-existing)
+track_skel_dir() {
+    local path="$1" relative="$2"
+    [[ -d "$path" ]] || SKEL_DIRS_CREATED+=("$relative")
+}
+
+# Track Flatpak override before gloam sets it — saves previous value for restore
+track_flatpak_override() {
+    local var="$1"
+    local overrides="${HOME}/.local/share/flatpak/overrides/global"
+    local prev=""
+    if [[ -f "$overrides" ]]; then
+        prev=$(sed -n "s/^${var}=//p" "$overrides" 2>/dev/null) || true
+    fi
+    FLATPAK_PREV_OVERRIDES+=("${var}=${prev}")
 }
 
 # Write global installation marker
 write_global_install_marker() {
     [[ "$INSTALL_GLOBAL" != true ]] && return
-    local added_keys=""
-    if [[ ${#XDG_KEYS_ADDED[@]} -gt 0 ]]; then
-        added_keys=$(IFS=,; echo "${XDG_KEYS_ADDED[*]}")
-    fi
+    local added_keys="" overwritten_keys="" skel_files="" skel_dirs=""
+    [[ ${#XDG_KEYS_ADDED[@]} -gt 0 ]] && added_keys=$(IFS=,; echo "${XDG_KEYS_ADDED[*]}")
+    [[ ${#XDG_KEYS_OVERWRITTEN[@]} -gt 0 ]] && overwritten_keys=$(IFS=,; echo "${XDG_KEYS_OVERWRITTEN[*]}")
+    [[ ${#SKEL_FILES_CREATED[@]} -gt 0 ]] && skel_files=$(IFS=,; echo "${SKEL_FILES_CREATED[*]}")
+    [[ ${#SKEL_DIRS_CREATED[@]} -gt 0 ]] && skel_dirs=$(IFS=,; echo "${SKEL_DIRS_CREATED[*]}")
     sudo tee "$GLOBAL_INSTALL_MARKER" > /dev/null <<EOF
 user=$USER
 date=$(date '+%Y-%m-%d %H:%M')
 xdg_keys_added=$added_keys
+xdg_keys_overwritten=$overwritten_keys
+skel_files_created=$skel_files
+skel_dirs_created=$skel_dirs
 EOF
 }
 
@@ -637,6 +676,7 @@ set_system_defaults() {
 
     # Copy gloam config to /etc/skel so new users get it
     sudo mkdir -p /etc/skel/.config
+    track_skel_file /etc/skel/.config/gloam.conf
     sudo cp "$CONFIG_FILE" /etc/skel/.config/gloam.conf
 
     # Copy desktop settings if requested
@@ -644,6 +684,7 @@ set_system_defaults() {
         # Panel applet layout (with wallpaper path rewrite)
         local panel_config="${HOME}/.config/plasma-org.kde.plasma.desktop-appletsrc"
         if [[ -f "$panel_config" ]]; then
+            track_skel_file /etc/skel/.config/plasma-org.kde.plasma.desktop-appletsrc
             sudo cp "$panel_config" /etc/skel/.config/plasma-org.kde.plasma.desktop-appletsrc
             sudo sed -i 's|Image=file://.*/wallpapers/gloam-|Image=file:///usr/share/wallpapers/gloam-|g' \
                 /etc/skel/.config/plasma-org.kde.plasma.desktop-appletsrc
@@ -664,6 +705,7 @@ set_system_defaults() {
         )
         for cfg in "${ux_configs[@]}"; do
             [[ -f "${HOME}/.config/${cfg}" ]] || continue
+            track_skel_file "/etc/skel/.config/${cfg}"
             sudo cp "${HOME}/.config/${cfg}" "/etc/skel/.config/${cfg}"
         done
 
@@ -690,6 +732,7 @@ set_system_defaults() {
         # Konsole profiles (color schemes and profiles)
         local konsole_dir="${HOME}/.local/share/konsole"
         if [[ -d "$konsole_dir" ]] && [[ -n "$(ls -A "$konsole_dir" 2>/dev/null)" ]]; then
+            track_skel_dir /etc/skel/.local/share/konsole konsole
             sudo mkdir -p /etc/skel/.local/share/konsole
             sudo cp -r "$konsole_dir"/* /etc/skel/.local/share/konsole/
         fi
@@ -697,6 +740,7 @@ set_system_defaults() {
         # Custom plasmoids so panel widgets work
         local plasmoids_dir="${HOME}/.local/share/plasma/plasmoids"
         if [[ -d "$plasmoids_dir" ]] && [[ -n "$(ls -A "$plasmoids_dir" 2>/dev/null)" ]]; then
+            track_skel_dir /etc/skel/.local/share/plasma/plasmoids plasma/plasmoids
             sudo mkdir -p /etc/skel/.local/share/plasma/plasmoids
             sudo cp -r "$plasmoids_dir"/* /etc/skel/.local/share/plasma/plasmoids/
         fi
@@ -1173,12 +1217,14 @@ apply_browser_color_scheme() {
 apply_flatpak_theme() {
     local theme="$1"
     command -v flatpak &>/dev/null || return 0
+    track_flatpak_override GTK_THEME
     flatpak override --user --env=GTK_THEME="$theme" 2>/dev/null || true
 }
 
 apply_flatpak_icons() {
     local icons="$1"
     command -v flatpak &>/dev/null || return 0
+    track_flatpak_override GTK_ICON_THEME
     flatpak override --user --env=GTK_ICON_THEME="$icons" 2>/dev/null || true
 }
 
@@ -1199,6 +1245,7 @@ setup_flatpak_permissions() {
 
 setup_flatpak_kvantum() {
     command -v flatpak &>/dev/null || return 0
+    track_flatpak_override QT_STYLE_OVERRIDE
     flatpak override --user --env=QT_STYLE_OVERRIDE=kvantum 2>/dev/null || true
 }
 
@@ -3509,6 +3556,11 @@ WantedBy=default.target"
     # Set system defaults for new users if requested
     set_system_defaults
 
+    # Write flatpak tracking to config (per-user state, after skel copy so it's not in skel)
+    if [[ ${#FLATPAK_PREV_OVERRIDES[@]} -gt 0 ]]; then
+        echo "FLATPAK_PREV_OVERRIDES=$(IFS=,; echo "${FLATPAK_PREV_OVERRIDES[*]}")" >> "$CONFIG_FILE"
+    fi
+
     # Write global installation marker
     write_global_install_marker
 
@@ -3650,6 +3702,33 @@ do_remove() {
         done
     fi
 
+    # Restore Flatpak overrides (must happen before config file removal)
+    if command -v flatpak &>/dev/null; then
+        local flatpak_csv=""
+        [[ -f "$CONFIG_FILE" ]] && flatpak_csv=$(grep "^FLATPAK_PREV_OVERRIDES=" "$CONFIG_FILE" 2>/dev/null | cut -d= -f2-) || true
+        if [[ -n "$flatpak_csv" ]]; then
+            IFS=',' read -ra fp_entries <<< "$flatpak_csv"
+            for entry in "${fp_entries[@]}"; do
+                local var="${entry%%=*}" old_val="${entry#*=}"
+                if [[ -n "$old_val" ]]; then
+                    flatpak override --user --env="${var}=${old_val}" 2>/dev/null || true
+                else
+                    flatpak override --user --unset-env="$var" 2>/dev/null || true
+                fi
+            done
+            echo "Reset Flatpak theme overrides"
+        else
+            # Fallback for installs before tracking
+            local flatpak_overrides="${HOME}/.local/share/flatpak/overrides/global"
+            if [[ -f "$flatpak_overrides" ]] && grep -q "GTK_THEME" "$flatpak_overrides" 2>/dev/null; then
+                flatpak override --user --unset-env=GTK_THEME 2>/dev/null || true
+                flatpak override --user --unset-env=GTK_ICON_THEME 2>/dev/null || true
+                flatpak override --user --unset-env=QT_STYLE_OVERRIDE 2>/dev/null || true
+                echo "Reset Flatpak theme overrides"
+            fi
+        fi
+    fi
+
     # Remove config and log files
     [[ -f "$CONFIG_FILE" ]] && rm "$CONFIG_FILE" && echo "Removed $CONFIG_FILE" || true
     [[ -f "$LOG_FILE" ]] && rm "$LOG_FILE" && echo "Removed $LOG_FILE" || true
@@ -3679,26 +3758,34 @@ do_remove() {
     remove_custom_themes
     remove_wallpaper_packs
 
-    # Remove system defaults for new users
-    [[ -f "$skel_config" ]] && sudo rm "$skel_config" && echo "Removed $skel_config" || true
-    local skel_ux_files=(
-        plasma-org.kde.plasma.desktop-appletsrc
-        plasmashellrc
-        kcminputrc
-        kwinrc
-        kglobalshortcutsrc
-        kscreenlockerrc
-        krunnerrc
-        dolphinrc
-        konsolerc
-        breezerc
-        kcmfonts
-    )
-    for cfg in "${skel_ux_files[@]}"; do
-        [[ -f "/etc/skel/.config/${cfg}" ]] && sudo rm "/etc/skel/.config/${cfg}" && echo "Removed /etc/skel/.config/${cfg}" || true
-    done
-    # Remove only the keys gloam added to /etc/xdg/kdeglobals
+    # Remove system defaults for new users (only files/dirs gloam created)
+    local skel_files_csv="" skel_dirs_csv=""
+    if [[ -f "$GLOBAL_INSTALL_MARKER" ]]; then
+        skel_files_csv=$(grep "^skel_files_created=" "$GLOBAL_INSTALL_MARKER" 2>/dev/null | cut -d= -f2-) || true
+        skel_dirs_csv=$(grep "^skel_dirs_created=" "$GLOBAL_INSTALL_MARKER" 2>/dev/null | cut -d= -f2-) || true
+    fi
+
+    if [[ -n "$skel_files_csv" ]]; then
+        # Tracked install: only remove files gloam created
+        IFS=',' read -ra created_files <<< "$skel_files_csv"
+        for cfg in "${created_files[@]}"; do
+            [[ -f "/etc/skel/.config/${cfg}" ]] && sudo rm "/etc/skel/.config/${cfg}" && echo "Removed /etc/skel/.config/${cfg}" || true
+        done
+    else
+        # No skel tracking (legacy install or set_system_defaults wasn't used): remove gloam.conf only
+        [[ -f "$skel_config" ]] && sudo rm "$skel_config" && echo "Removed $skel_config" || true
+    fi
+
+    if [[ -n "$skel_dirs_csv" ]]; then
+        IFS=',' read -ra created_dirs <<< "$skel_dirs_csv"
+        for dir in "${created_dirs[@]}"; do
+            [[ -d "/etc/skel/.local/share/${dir}" ]] && sudo rm -rf "/etc/skel/.local/share/${dir}" && echo "Removed /etc/skel/.local/share/${dir}" || true
+        done
+    fi
+
+    # Remove/restore keys gloam set in /etc/xdg/kdeglobals
     if [[ -f /etc/xdg/kdeglobals && -f "$GLOBAL_INSTALL_MARKER" ]]; then
+        # Delete keys that gloam added (didn't exist before)
         local added_keys_csv
         added_keys_csv=$(grep "^xdg_keys_added=" "$GLOBAL_INSTALL_MARKER" 2>/dev/null | cut -d= -f2-)
         if [[ -n "$added_keys_csv" ]]; then
@@ -3708,23 +3795,24 @@ do_remove() {
                 sudo kwriteconfig6 --file /etc/xdg/kdeglobals --group "$group" --key "$key" --delete 2>/dev/null || true
             done
         fi
+
+        # Restore keys that gloam overwrote to their previous values
+        local overwritten_csv
+        overwritten_csv=$(grep "^xdg_keys_overwritten=" "$GLOBAL_INSTALL_MARKER" 2>/dev/null | cut -d= -f2-)
+        if [[ -n "$overwritten_csv" ]]; then
+            IFS=',' read -ra overwritten_keys <<< "$overwritten_csv"
+            for entry in "${overwritten_keys[@]}"; do
+                local gk="${entry%%=*}" old_val="${entry#*=}"
+                local group="${gk%%:*}" key="${gk#*:}"
+                sudo kwriteconfig6 --file /etc/xdg/kdeglobals --group "$group" --key "$key" "$old_val" 2>/dev/null || true
+            done
+        fi
     fi
-    [[ -d /etc/skel/.local/share/plasma/plasmoids ]] && sudo rm -rf /etc/skel/.local/share/plasma/plasmoids && echo "Removed /etc/skel/.local/share/plasma/plasmoids" || true
-    [[ -d /etc/skel/.local/share/konsole ]] && sudo rm -rf /etc/skel/.local/share/konsole && echo "Removed /etc/skel/.local/share/konsole" || true
 
     # Remove keyboard shortcut from /etc/xdg/kglobalshortcutsrc
     if [[ -f "$xdg_shortcuts" ]] && grep -q "$SHORTCUT_ID" "$xdg_shortcuts" 2>/dev/null; then
         sudo kwriteconfig6 --file "$xdg_shortcuts" --group "services" --group "$SHORTCUT_ID" --key "_launch" --delete
         echo "Removed system keyboard shortcut"
-    fi
-
-    # Reset Flatpak overrides (only if gloam set them)
-    local flatpak_overrides="${HOME}/.local/share/flatpak/overrides/global"
-    if command -v flatpak &>/dev/null && [[ -f "$flatpak_overrides" ]] && grep -q "GTK_THEME" "$flatpak_overrides" 2>/dev/null; then
-        flatpak override --user --unset-env=GTK_THEME 2>/dev/null || true
-        flatpak override --user --unset-env=GTK_ICON_THEME 2>/dev/null || true
-        flatpak override --user --unset-env=QT_STYLE_OVERRIDE 2>/dev/null || true
-        echo "Reset Flatpak theme overrides"
     fi
 
     # Unmask splash service in case we masked it
