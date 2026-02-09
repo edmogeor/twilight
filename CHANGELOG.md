@@ -7,6 +7,11 @@
 - Rename wallpaper pack directory from `gloam-dynamic` to `gloam`
 - SDDM and lockscreen now source wallpapers from the single pack's `images/` and `images_dark/` directories
 
+### Fixed
+- Ctrl+C now properly exits the script during interactive prompts
+- Reconfigure correctly resolves custom themes back to base themes
+- Custom theme prompt only appears when configuring bundleable options
+
 ## [1.0.3] - 2026-02-08
 
 ### Added
