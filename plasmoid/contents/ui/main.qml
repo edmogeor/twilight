@@ -78,13 +78,14 @@ PlasmoidItem {
     fullRepresentation: MouseArea {
         id: mouseArea
 
+        enabled: !root.isRunning
         hoverEnabled: true
         onClicked: root.runCommand("gloam toggle")
 
         Kirigami.Icon {
             source: Plasmoid.icon
             anchors.fill: parent
-            active: mouseArea.containsMouse
+            active: mouseArea.containsMouse && !root.isRunning
             visible: !root.isRunning
         }
 
