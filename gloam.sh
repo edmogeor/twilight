@@ -522,10 +522,10 @@ install_bundled_assets_system_wide() {
     install_icons_system_wide
 
     # Set system-wide default desktop wallpaper via Plasma plugin config
-    if [[ "${WALLPAPER:-}" == true && -d "/usr/share/wallpapers/gloam-dynamic" ]]; then
+    if [[ "${WALLPAPER:-}" == true && -d "/usr/share/wallpapers/gloam" ]]; then
         local wp_main_xml="/usr/share/plasma/wallpapers/org.kde.image/contents/config/main.xml"
         if [[ -f "$wp_main_xml" ]]; then
-            sudo sed -i '/<entry name="Image"/,/<\/entry>/ s|<default>[^<]*</default>|<default>file:///usr/share/wallpapers/gloam-dynamic</default>|' "$wp_main_xml" 2>/dev/null || true
+            sudo sed -i '/<entry name="Image"/,/<\/entry>/ s|<default>[^<]*</default>|<default>file:///usr/share/wallpapers/gloam</default>|' "$wp_main_xml" 2>/dev/null || true
         fi
     fi
 }
@@ -593,15 +593,15 @@ push_config_to_users() {
 
             # Rewrite gloam wallpaper paths in lock screen config
             if [[ -f "${homedir}/.config/kscreenlockerrc" ]]; then
-                sudo sed -i 's|Image=file://.*/wallpapers/gloam-|Image=file:///usr/share/wallpapers/gloam-|g' \
+                sudo sed -i 's|Image=file://.*/wallpapers/gloam|Image=file:///usr/share/wallpapers/gloam|g' \
                     "${homedir}/.config/kscreenlockerrc"
             fi
 
             # Set lockscreen wallpaper if not already a gloam wallpaper
-            if [[ "${WALLPAPER:-}" == true ]] && ! grep -q 'wallpapers/gloam-' "${homedir}/.config/kscreenlockerrc" 2>/dev/null; then
+            if [[ "${WALLPAPER:-}" == true ]] && ! grep -q 'wallpapers/gloam' "${homedir}/.config/kscreenlockerrc" 2>/dev/null; then
                 sudo -u "$username" kwriteconfig6 --file "${homedir}/.config/kscreenlockerrc" \
                     --group Greeter --group Wallpaper --group org.kde.image --group General \
-                    --key Image "file:///usr/share/wallpapers/gloam-dynamic" 2>/dev/null || true
+                    --key Image "file:///usr/share/wallpapers/gloam" 2>/dev/null || true
             fi
 
             # Konsole profiles (color schemes and profiles)
@@ -624,10 +624,10 @@ push_config_to_users() {
         # Apply wallpapers to user even without full desktop layout copy
         if [[ "${WALLPAPER:-}" == true && "${COPY_DESKTOP_LAYOUT:-}" != true ]]; then
             # Set lockscreen wallpaper
-            if ! sudo grep -q 'wallpapers/gloam-' "${homedir}/.config/kscreenlockerrc" 2>/dev/null; then
+            if ! sudo grep -q 'wallpapers/gloam' "${homedir}/.config/kscreenlockerrc" 2>/dev/null; then
                 sudo -u "$username" kwriteconfig6 --file "${homedir}/.config/kscreenlockerrc" \
                     --group Greeter --group Wallpaper --group org.kde.image --group General \
-                    --key Image "file:///usr/share/wallpapers/gloam-dynamic" 2>/dev/null || true
+                    --key Image "file:///usr/share/wallpapers/gloam" 2>/dev/null || true
             fi
         fi
 
@@ -718,15 +718,15 @@ set_system_defaults() {
 
         # Rewrite gloam wallpaper paths in lock screen config
         if [[ -f /etc/skel/.config/kscreenlockerrc ]]; then
-            sudo sed -i 's|Image=file://.*/wallpapers/gloam-|Image=file:///usr/share/wallpapers/gloam-|g' \
+            sudo sed -i 's|Image=file://.*/wallpapers/gloam|Image=file:///usr/share/wallpapers/gloam|g' \
                 /etc/skel/.config/kscreenlockerrc
         fi
 
         # Set lockscreen wallpaper if not already a gloam wallpaper
-        if [[ "${WALLPAPER:-}" == true ]] && ! grep -q 'wallpapers/gloam-' /etc/skel/.config/kscreenlockerrc 2>/dev/null; then
+        if [[ "${WALLPAPER:-}" == true ]] && ! grep -q 'wallpapers/gloam' /etc/skel/.config/kscreenlockerrc 2>/dev/null; then
             sudo kwriteconfig6 --file /etc/skel/.config/kscreenlockerrc \
                 --group Greeter --group Wallpaper --group org.kde.image --group General \
-                --key Image "file:///usr/share/wallpapers/gloam-dynamic"
+                --key Image "file:///usr/share/wallpapers/gloam"
         fi
 
         # Konsole profiles (color schemes and profiles)
@@ -1339,8 +1339,8 @@ apply_sddm_theme() {
 # Re-apply dynamic wallpapers from the bundled location to desktop and lock screen
 reapply_bundled_wallpapers() {
     if [[ "${WALLPAPER:-}" == true && -n "${WALLPAPER_BASE:-}" ]]; then
-        apply_desktop_wallpaper "${WALLPAPER_BASE}/gloam-dynamic"
-        apply_lockscreen_wallpaper "${WALLPAPER_BASE}/gloam-dynamic"
+        apply_desktop_wallpaper "${WALLPAPER_BASE}/gloam"
+        apply_lockscreen_wallpaper "${WALLPAPER_BASE}/gloam"
     fi
 }
 
@@ -1366,14 +1366,14 @@ is_gloam_wallpaper() {
             wp=$(awk '/\[Wallpaper\]\[org\.kde\.image\]\[General\]/ { found=1; next }
                  /^\[/ { found=0 }
                  found && /^Image=/ { print substr($0, 7); exit }' "$rc")
-            [[ "$wp" == *"/wallpapers/gloam-"* ]]
+            [[ "$wp" == *"/wallpapers/gloam"* ]]
             ;;
         lockscreen)
             local wp
             wp=$(kreadconfig6 --file kscreenlockerrc \
                 --group Greeter --group Wallpaper --group org.kde.image --group General \
                 --key Image 2>/dev/null)
-            [[ "$wp" == *"/wallpapers/gloam-"* ]]
+            [[ "$wp" == *"/wallpapers/gloam"* ]]
             ;;
         sddm)
             local theme bg
@@ -1445,9 +1445,9 @@ setup_sddm_wallpaper() {
         wp_base="${HOME}/.local/share/wallpapers"
     fi
 
-    # Pick the largest image from each pack for SDDM
+    # Pick the largest image from the gloam pack for each variant
     local best_light="" best_dark="" best_pixels=0
-    for img in "${wp_base}/gloam-light/contents/images/"*; do
+    for img in "${wp_base}/gloam/contents/images/"*; do
         [[ -f "$img" ]] || continue
         local dims
         dims=$(get_image_dimensions "$img")
@@ -1461,7 +1461,7 @@ setup_sddm_wallpaper() {
     done
 
     best_pixels=0
-    for img in "${wp_base}/gloam-dark/contents/images/"*; do
+    for img in "${wp_base}/gloam/contents/images_dark/"*; do
         [[ -f "$img" ]] || continue
         local dims
         dims=$(get_image_dimensions "$img")
@@ -1850,12 +1850,10 @@ bundle_wallpapers_and_sddm() {
         # locally before the global install decision was made
         local wp_src=""
         for candidate in "/usr/share/wallpapers" "${HOME}/.local/share/wallpapers"; do
-            for pack in gloam-dynamic gloam-light gloam-dark; do
-                if [[ -d "${candidate}/${pack}" ]]; then
-                    wp_src="$candidate"
-                    break 2
-                fi
-            done
+            if [[ -d "${candidate}/gloam" ]]; then
+                wp_src="$candidate"
+                break
+            fi
         done
 
         local has_packs=false
@@ -1863,11 +1861,8 @@ bundle_wallpapers_and_sddm() {
 
         if [[ "$has_packs" == true ]]; then
             theme_cmd mkdir -p "${theme_dir_light}/contents/wallpapers"
-            for pack in gloam-dynamic gloam-light gloam-dark; do
-                [[ -d "${wp_src}/${pack}" ]] || continue
-                theme_cmd cp -r "${wp_src}/${pack}" "${theme_dir_light}/contents/wallpapers/${pack}"
-                theme_cmd rm -rf "${wp_src}/${pack}"
-            done
+            theme_cmd cp -r "${wp_src}/gloam" "${theme_dir_light}/contents/wallpapers/gloam"
+            theme_cmd rm -rf "${wp_src}/gloam"
 
             # Set WALLPAPER_BASE to point to the bundled location
             WALLPAPER_BASE="${theme_dir_light}/contents/wallpapers"
@@ -1885,8 +1880,14 @@ bundle_wallpapers_and_sddm() {
 
         # If SDDM image doesn't exist, create it from the wallpaper pack
         if [[ -z "$sddm_bg" || ! -f "$sddm_bg" ]] && [[ -n "$sddm_wp_base" ]]; then
+            local img_dir
+            if [[ "$variant" == "light" ]]; then
+                img_dir="${sddm_wp_base}/gloam/contents/images"
+            else
+                img_dir="${sddm_wp_base}/gloam/contents/images_dark"
+            fi
             local best_img="" best_px=0
-            for img in "${sddm_wp_base}/gloam-${variant}/contents/images/"*; do
+            for img in "${img_dir}/"*; do
                 [[ -f "$img" ]] || continue
                 local dims
                 dims=$(get_image_dimensions "$img")
@@ -1934,7 +1935,7 @@ remove_custom_themes() {
 }
 
 remove_wallpaper_packs() {
-    for pack in gloam-dynamic gloam-light gloam-dark; do
+    for pack in gloam; do
         local local_path="${HOME}/.local/share/wallpapers/${pack}"
         local global_path="/usr/share/wallpapers/${pack}"
         [[ -d "$local_path" ]] && rm -rf "$local_path" && echo "Removed $local_path"
@@ -2023,8 +2024,8 @@ apply_theme() {
     # Wallpapers - switch each surface unless the user has overridden it
     if [[ "${WALLPAPER:-}" == true ]]; then
         local wp_base="${WALLPAPER_BASE:-${HOME}/.local/share/wallpapers}"
-        is_gloam_wallpaper desktop && apply_desktop_wallpaper "${wp_base}/gloam-${mode}"
-        is_gloam_wallpaper lockscreen && apply_lockscreen_wallpaper "${wp_base}/gloam-${mode}"
+        is_gloam_wallpaper desktop && apply_desktop_wallpaper "${wp_base}/gloam"
+        is_gloam_wallpaper lockscreen && apply_lockscreen_wallpaper "${wp_base}/gloam"
         # SDDM background - check if gloam images exist on disk (user opted in during configure)
         # Note: can't use is_gloam_wallpaper sddm here because the LookAndFeel's defaults
         # may have switched the SDDM theme, and the new theme won't have a gloam background yet
@@ -3024,18 +3025,15 @@ do_configure() {
             WP_SOURCE_DARK="${wp_dark_paths[*]}"
 
             echo ""
-            echo "Creating wallpaper packs..."
-            local wp_empty=()
-            generate_wallpaper_pack "gloam-dynamic" "Custom (Dynamic)" wp_light_paths wp_dark_paths
-            generate_wallpaper_pack "gloam-light" "Custom (Light)" wp_light_paths wp_empty
-            generate_wallpaper_pack "gloam-dark" "Custom (Dark)" wp_dark_paths wp_empty
+            echo "Creating wallpaper pack..."
+            generate_wallpaper_pack "gloam" "Custom" wp_light_paths wp_dark_paths
 
             echo ""
             local wallpaper_dir
             if [[ "${THEME_INSTALL_GLOBAL:-${INSTALL_GLOBAL:-false}}" == true ]]; then
-                wallpaper_dir="/usr/share/wallpapers/gloam-dynamic"
+                wallpaper_dir="/usr/share/wallpapers/gloam"
             else
-                wallpaper_dir="${HOME}/.local/share/wallpapers/gloam-dynamic"
+                wallpaper_dir="${HOME}/.local/share/wallpapers/gloam"
             fi
             echo -n "Applying to desktop... "
             apply_desktop_wallpaper "$wallpaper_dir"
@@ -3292,7 +3290,7 @@ do_configure() {
 
                 # Re-apply wallpapers from bundled location
                 if [[ "${WALLPAPER:-}" == true && -n "${WALLPAPER_BASE:-}" ]]; then
-                    local wp_mode="gloam-dynamic"
+                    local wp_mode="gloam"
                     apply_desktop_wallpaper "${WALLPAPER_BASE}/${wp_mode}"
                     apply_lockscreen_wallpaper "${WALLPAPER_BASE}/${wp_mode}"
                 fi
@@ -3323,9 +3321,9 @@ do_configure() {
         generate_custom_theme "light" "$BASE_THEME_LIGHT"
         generate_custom_theme "dark" "$BASE_THEME_DARK"
 
-        # Regenerate wallpaper packs from original source images
+        # Regenerate wallpaper pack from original source images
         if [[ "${WALLPAPER:-}" == true && -n "${WP_SOURCE_LIGHT:-}" && -n "${WP_SOURCE_DARK:-}" ]]; then
-            echo "Creating wallpaper packs..."
+            echo "Creating wallpaper pack..."
             local wp_light_paths=() wp_dark_paths=()
             local img
             for img in ${WP_SOURCE_LIGHT}; do
@@ -3335,10 +3333,7 @@ do_configure() {
                 [[ -f "$img" ]] && wp_dark_paths+=("$img")
             done
             if [[ ${#wp_light_paths[@]} -gt 0 && ${#wp_dark_paths[@]} -gt 0 ]]; then
-                local wp_empty=()
-                generate_wallpaper_pack "gloam-dynamic" "Custom (Dynamic)" wp_light_paths wp_dark_paths
-                generate_wallpaper_pack "gloam-light" "Custom (Light)" wp_light_paths wp_empty
-                generate_wallpaper_pack "gloam-dark" "Custom (Dark)" wp_dark_paths wp_empty
+                generate_wallpaper_pack "gloam" "Custom" wp_light_paths wp_dark_paths
             fi
         fi
 
@@ -3594,7 +3589,7 @@ do_remove() {
     local xdg_shortcuts="/etc/xdg/kglobalshortcutsrc"
 
     local needs_sudo=false
-    [[ -f "$global_service" || -f "$global_cli" || -d "$global_plasmoid" || -f "$global_shortcut" || -d "$global_theme_light" || -d "$global_theme_dark" || -f "$skel_config" || -L "$global_service_link" || -f "$GLOBAL_INSTALL_MARKER" || -d "$GLOBAL_SCRIPTS_DIR" || -f /etc/sudoers.d/gloam-sddm || -f /etc/sudoers.d/gloam-sddm-bg || -d /usr/local/lib/gloam || -d /usr/share/wallpapers/gloam-dynamic ]] && needs_sudo=true
+    [[ -f "$global_service" || -f "$global_cli" || -d "$global_plasmoid" || -f "$global_shortcut" || -d "$global_theme_light" || -d "$global_theme_dark" || -f "$skel_config" || -L "$global_service_link" || -f "$GLOBAL_INSTALL_MARKER" || -d "$GLOBAL_SCRIPTS_DIR" || -f /etc/sudoers.d/gloam-sddm || -f /etc/sudoers.d/gloam-sddm-bg || -d /usr/local/lib/gloam || -d /usr/share/wallpapers/gloam ]] && needs_sudo=true
 
     if [[ "$needs_sudo" == true ]]; then
         # Warn about global installation
