@@ -1621,15 +1621,25 @@ apply_app_style() {
 }
 
 # Check if user configured any options that can be bundled into a custom theme
+# If $1 is "current", only check options being configured in this run
 has_bundleable_options() {
-    [[ -n "${COLOR_LIGHT:-}" || -n "${COLOR_DARK:-}" || \
-       -n "${ICON_LIGHT:-}" || -n "${ICON_DARK:-}" || \
-       -n "${CURSOR_LIGHT:-}" || -n "${CURSOR_DARK:-}" || \
-       -n "${STYLE_LIGHT:-}" || -n "${STYLE_DARK:-}" || \
-       -n "${DECORATION_LIGHT:-}" || -n "${DECORATION_DARK:-}" || \
-       -n "${SPLASH_LIGHT:-}" || -n "${SPLASH_DARK:-}" || \
-       -n "${SDDM_LIGHT:-}" || -n "${SDDM_DARK:-}" || \
-       -n "${APPSTYLE_LIGHT:-}" || -n "${APPSTYLE_DARK:-}" ]]
+    local mode="${1:-}"
+    if [[ "$mode" == "current" ]]; then
+        [[ "$configure_colors" == true || "$configure_icons" == true || \
+           "$configure_cursors" == true || "$configure_style" == true || \
+           "$configure_decorations" == true || "$configure_splash" == true || \
+           "$configure_login" == true || "$configure_appstyle" == true || \
+           "$configure_wallpaper" == true || "$configure_all" == true ]]
+    else
+        [[ -n "${COLOR_LIGHT:-}" || -n "${COLOR_DARK:-}" || \
+           -n "${ICON_LIGHT:-}" || -n "${ICON_DARK:-}" || \
+           -n "${CURSOR_LIGHT:-}" || -n "${CURSOR_DARK:-}" || \
+           -n "${STYLE_LIGHT:-}" || -n "${STYLE_DARK:-}" || \
+           -n "${DECORATION_LIGHT:-}" || -n "${DECORATION_DARK:-}" || \
+           -n "${SPLASH_LIGHT:-}" || -n "${SPLASH_DARK:-}" || \
+           -n "${SDDM_LIGHT:-}" || -n "${SDDM_DARK:-}" || \
+           -n "${APPSTYLE_LIGHT:-}" || -n "${APPSTYLE_DARK:-}" ]]
+    fi
 }
 
 # Set theme install directory based on installation mode
@@ -2561,6 +2571,7 @@ do_configure() {
             echo -e "${YELLOW}Existing configuration found.${RESET}"
             read -rp "Do you want to overwrite it? [y/N]: " choice
             if [[ "$choice" =~ ^[Yy]$ ]]; then
+                source "$CONFIG_FILE"
                 cleanup_stale
             else
                 echo "Use configure options to modify specific settings (e.g. --kvantum, --gtk)."
@@ -3017,7 +3028,7 @@ do_configure() {
 
         echo -e "${GREEN}Custom themes updated.${RESET}"
 
-    elif has_bundleable_options; then
+    elif has_bundleable_options current; then
         # First time - ask user if they want custom themes
         echo ""
         echo -e "${BOLD}Custom Themes${RESET}"
