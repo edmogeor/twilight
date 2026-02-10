@@ -2479,11 +2479,11 @@ do_watch() {
 
     log "Watcher started"
 
-    # Wait for KWin dbus interface (service is started via systemd ordering, just need dbus ready)
+    # Wait for KNightTime dbus service
     local wait_count=0
-    while ! qdbus6 org.kde.KWin /org/kde/KWin/NightLight org.kde.KWin.NightLight.daylight &>/dev/null; do
+    while ! busctl --user status org.kde.NightTime &>/dev/null; do
         if (( wait_count >= 20 )); then
-            log "KWin dbus not ready after 5s, proceeding anyway"
+            log "KNightTime dbus not ready after 5s, proceeding anyway"
             break
         fi
         sleep 0.25
@@ -2493,8 +2493,39 @@ do_watch() {
     local auto_mode
     auto_mode=$(kreadconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel)
     if [[ "$auto_mode" == "true" ]]; then
-        local is_daylight
-        is_daylight=$(qdbus6 org.kde.KWin /org/kde/KWin/NightLight org.kde.KWin.NightLight.daylight 2>/dev/null)
+        local is_daylight=true
+        local subscribe_output
+        if subscribe_output=$(busctl --user call org.kde.NightTime /org/kde/NightTime/Manager \
+                org.kde.NightTime.Manager Subscribe 'a{sv}' 0 2>/dev/null); then
+            # Extract cookie for cleanup
+            local cookie
+            cookie=$(echo "$subscribe_output" | grep -oP '(?<="Cookie" u )\d+')
+            # Extract schedule timestamps: each cycle is (noon, morning-start, morning-end, evening-start, evening-end) in ms
+            local now_ms
+            now_ms=$(date +%s%3N)
+            # Strip everything up to the timestamp array
+            local -a timestamps
+            read -ra timestamps <<< "$(echo "$subscribe_output" | sed 's/.*a(xxxxx) [0-9]* //')"
+            # Match Plasma's autoswitcher: light after morning-end, dark after evening-end
+            # (transitions are kept as-is during the transition period)
+            local i morning_end evening_end
+            for (( i=0; i < ${#timestamps[@]}; i+=5 )); do
+                morning_end=${timestamps[i+2]}
+                evening_end=${timestamps[i+4]}
+                if (( now_ms >= morning_end && now_ms < evening_end )); then
+                    is_daylight=true
+                    break
+                elif (( now_ms < morning_end )); then
+                    is_daylight=false
+                    break
+                elif (( now_ms >= evening_end )); then
+                    is_daylight=false
+                fi
+            done
+            # Unsubscribe
+            busctl --user call org.kde.NightTime /org/kde/NightTime/Manager \
+                org.kde.NightTime.Manager Unsubscribe u "${cookie:-0}" &>/dev/null
+        fi
         if [[ "$is_daylight" == "false" ]]; then
             PREV_LAF="$LAF_DARK"
         else
