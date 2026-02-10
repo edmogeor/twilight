@@ -1528,13 +1528,18 @@ install_packages() {
 }
 
 check_dependencies() {
+    # This runs before gum is available — use only plain bash + ANSI codes
+
     # KDE dependencies — required, no offer to install
     local kde_missing=()
     command -v kreadconfig6 &>/dev/null || kde_missing+=("kreadconfig6")
     command -v kwriteconfig6 &>/dev/null || kde_missing+=("kwriteconfig6")
 
     if [[ ${#kde_missing[@]} -gt 0 ]]; then
-        die "Missing KDE dependencies:\n$(printf '  - %s\n' "${kde_missing[@]}")\nPlease install the KDE Frameworks packages for your distribution."
+        echo -e "${RED}${BOLD}Missing KDE dependencies:${RESET}"
+        printf '  - %s\n' "${kde_missing[@]}"
+        echo -e "Please install the KDE Frameworks packages for your distribution."
+        exit 1
     fi
 
     # Non-KDE dependencies — offer to install
@@ -1554,16 +1559,17 @@ check_dependencies() {
 
     [[ ${#missing_pkgs[@]} -eq 0 ]] && return 0
 
-    gum style --foreground "$CLR_WARNING" --bold "Missing dependencies:"
+    echo -e "${YELLOW}${BOLD}Missing dependencies:${RESET}"
     for i in "${!missing_cmds[@]}"; do
-        echo "  $(gum style --foreground "$CLR_WARNING" "•") ${missing_cmds[$i]} (${missing_pkgs[$i]})"
+        echo -e "  ${YELLOW}•${RESET} ${missing_cmds[$i]} (${missing_pkgs[$i]})"
     done
 
     local mgr
     mgr=$(detect_pkg_manager)
 
     if [[ -z "$mgr" ]]; then
-        die "Could not detect a supported package manager. Please install manually: ${missing_pkgs[*]}"
+        echo -e "${RED}Could not detect a supported package manager. Please install manually: ${missing_pkgs[*]}${RESET}"
+        exit 1
     fi
 
     # Resolve distro-specific package names
@@ -1572,12 +1578,18 @@ check_dependencies() {
         resolved_pkgs+=("$(get_pkg_name "$pkg" "$mgr")")
     done
 
-    if ! _gum_confirm --default=yes "Install with $mgr?"; then
-        die "Missing dependencies: ${missing_pkgs[*]}"
-    fi
+    echo ""
+    read -rp "Install with $mgr? [Y/n] " answer
+    case "${answer:-Y}" in
+        [Yy]|[Yy]es|"") ;;
+        *)
+            echo -e "${RED}Missing dependencies: ${missing_pkgs[*]}${RESET}"
+            exit 1
+            ;;
+    esac
 
-    install_packages "$mgr" "${resolved_pkgs[@]}" || die "Failed to install dependencies: ${resolved_pkgs[*]}"
-    msg_ok "Dependencies installed."
+    install_packages "$mgr" "${resolved_pkgs[@]}" || { echo -e "${RED}Failed to install dependencies: ${resolved_pkgs[*]}${RESET}"; exit 1; }
+    echo -e "${GREEN}${BOLD}Dependencies installed.${RESET}"
 }
 
 get_laf() {
@@ -2605,7 +2617,6 @@ print_config_summary() {
 
 do_configure() {
     check_desktop_environment
-    check_dependencies
 
 
     # Parse modifiers first to know if this is a full or partial configure
@@ -4159,6 +4170,8 @@ show_help() {
 }
 
 # --- MAIN ENTRY POINT ---------------------------------------------------------
+
+check_dependencies
 
 # Show banner only for interactive commands (--no-banner used by internal re-exec)
 case "${1:-}" in
