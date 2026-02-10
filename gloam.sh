@@ -3620,8 +3620,8 @@ EOF
 
     local service_content="[Unit]
 Description=Plasma Light/Dark Theme Sync
-After=plasma-core.target
-Before=plasma-workspace.target
+After=plasma-kwin_wayland.service plasma-kwin_x11.service
+Before=plasma-core.target
 
 [Service]${exec_condition}
 Type=notify
