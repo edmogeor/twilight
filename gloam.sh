@@ -303,8 +303,6 @@ SHORTCUT_ID="gloam-toggle.desktop"
 # Delays (seconds) for KDE to finish writing configs after LookAndFeel apply
 DELAY_LAF_SETTLE=0.5
 DELAY_LAF_PROPAGATE=1
-DELAY_PLASMA_POLL=0.25
-PLASMA_POLL_MAX=120
 
 # Expected config variables (must match the heredoc that writes gloam.conf)
 EXPECTED_CONFIG_VARS=(
@@ -2481,38 +2479,34 @@ do_watch() {
 
     log "Watcher started"
 
-    # Wait for Plasma to fully initialize before applying theme
+    # Wait for KWin to be available (needed for day/night query)
     local wait_count=0
-    while ! dbus-send --session --dest=org.freedesktop.DBus --print-reply \
-        /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner \
-        string:"org.kde.plasmashell" 2>/dev/null | grep -q "boolean true"; do
-        if (( wait_count >= PLASMA_POLL_MAX )); then
-            log "Plasma shell not detected after $(( PLASMA_POLL_MAX / 4 ))s, proceeding anyway"
+    while ! qdbus6 org.kde.KWin /org/kde/KWin/NightLight org.kde.KWin.NightLight.daylight &>/dev/null; do
+        if (( wait_count >= 40 )); then
+            log "KWin not detected after 10s, proceeding anyway"
             break
         fi
-        sleep "$DELAY_PLASMA_POLL"
+        sleep 0.25
         (( wait_count++ ))
     done
 
-    # Wait for kded6 (KDE daemon) so QT apps can pick up theme changes
-    wait_count=0
-    while ! dbus-send --session --dest=org.freedesktop.DBus --print-reply \
-        /org/freedesktop/DBus org.freedesktop.DBus.NameHasOwner \
-        string:"org.kde.kded6" 2>/dev/null | grep -q "boolean true"; do
-        if (( wait_count >= PLASMA_POLL_MAX )); then
-            log "kded6 not detected after $(( PLASMA_POLL_MAX / 4 ))s, proceeding anyway"
-            break
-        fi
-        sleep "$DELAY_PLASMA_POLL"
-        (( wait_count++ ))
-    done
-
-    # Give QT apps a moment to finish initializing after kded6 is up
-    sleep "$DELAY_LAF_PROPAGATE"
-
-    PREV_LAF=$(get_laf)
+    # Determine the correct theme from the day/night cycle
+    local is_daylight
+    is_daylight=$(qdbus6 org.kde.KWin /org/kde/KWin/NightLight org.kde.KWin.NightLight.daylight 2>/dev/null)
+    if [[ "$is_daylight" == "false" ]]; then
+        PREV_LAF="$LAF_DARK"
+    else
+        PREV_LAF="$LAF_LIGHT"
+    fi
     log "Initial theme: $PREV_LAF"
+    local auto_mode
+    auto_mode=$(kreadconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel)
+    plasma-apply-lookandfeel -a "$PREV_LAF" 2>/dev/null
+    [[ "$auto_mode" == "true" ]] && kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
     apply_theme "$PREV_LAF" true
+
+    # Signal systemd that initial theme is applied — session restore can proceed
+    systemd-notify --ready 2>/dev/null || true
 
     local last_apply=0
     inotifywait -q -m -e moved_to "${HOME}/.config" --include 'kdeglobals' |
@@ -3627,8 +3621,10 @@ EOF
     local service_content="[Unit]
 Description=Plasma Light/Dark Theme Sync
 After=graphical-session.target
+Before=plasma-restoresession.service plasma-kded.service autostart.target
 
 [Service]${exec_condition}
+Type=notify
 ExecStart=$executable_path watch
 Restart=on-failure
 RestartSec=5
@@ -3644,7 +3640,8 @@ WantedBy=default.target"
     fi
 
     systemctl --user daemon-reload
-    systemctl --user enable --now "$SERVICE_NAME" 2>/dev/null
+    systemctl --user enable "$SERVICE_NAME" 2>/dev/null
+    systemctl --user start --no-block "$SERVICE_NAME" 2>/dev/null
 
     # Enable automatic theme switching in KDE Quick Settings
     kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
