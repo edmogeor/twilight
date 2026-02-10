@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.1] - 2026-02-10
+
+### Added
+- Show user's selection after Installation Mode, Apply to Other Users, and Copy Desktop Settings prompts
+- Spinners for import config validation and setting system defaults
+
+### Changed
+- "Both existing and new users" is now the first option in the user apply menu
+
+### Fixed
+- Unbound variable crash in `select_themes` when light and dark choices are identical
+- Silent exit in `apply_sddm_for_current_mode` when no wallpaper background found (`set -e`)
+- Missing spacing before Konsole profiles prompt
+
 ## [1.1.0] - 2026-02-09
 
 ### Added
