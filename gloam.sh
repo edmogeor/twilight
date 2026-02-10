@@ -49,7 +49,7 @@ BLUE='\033[38;5;99m'
 RESET='\033[0m'
 
 # Version
-GLOAM_VERSION="1.1.0"
+GLOAM_VERSION="1.1.1"
 GLOAM_REPO="edmogeor/gloam"
 
 
@@ -632,19 +632,24 @@ ask_global_install() {
             if ! _gum_confirm --default=yes "Continue with local installation?"; then
                 exit 1
             fi
+            msg_ok "Local install"
             return
         fi
 
         # Check for existing global installation
         if ! check_existing_global_install; then
             msg_muted "Falling back to local installation."
+            msg_ok "Local install"
             return
         fi
 
         INSTALL_GLOBAL=true
+        msg_ok "Global install"
 
         # Ask about applying settings to other users
         ask_apply_to_users
+    else
+        msg_ok "Local install"
     fi
 }
 
@@ -664,31 +669,37 @@ ask_apply_to_users() {
     if [[ "$has_other_users" == true ]]; then
         local choice
         choice=$(_gum_choose --header "Apply settings to other users?" \
+            "Both existing and new users" \
             "Existing users only" \
             "New users only (set as system defaults)" \
-            "Both existing and new users" \
             "Neither")
         case "$choice" in
             "Existing users only")
                 SELECTED_USERS=("${users[@]}")
                 PUSH_TO_USERS=true
+                msg_ok "Existing users only"
                 ;;
             "New users only (set as system defaults)")
                 SET_SYSTEM_DEFAULTS=true
+                msg_ok "New users only"
                 ;;
             "Both existing and new users")
                 SELECTED_USERS=("${users[@]}")
                 PUSH_TO_USERS=true
                 SET_SYSTEM_DEFAULTS=true
+                msg_ok "Both existing and new users"
                 ;;
             *)
+                msg_ok "Neither"
                 return
                 ;;
         esac
     else
         if _gum_confirm "Set as system defaults for new users?"; then
             SET_SYSTEM_DEFAULTS=true
+            msg_ok "New users only"
         else
+            msg_ok "Neither"
             return
         fi
     fi
@@ -702,7 +713,12 @@ ask_apply_to_users() {
         "  - Keyboard shortcuts" \
         "  - Desktop and lock screen wallpapers" \
         "  - App settings (Dolphin, Konsole profiles, KRunner)"
-    _gum_confirm "Copy desktop settings?" && COPY_DESKTOP_LAYOUT=true
+    if _gum_confirm "Copy desktop settings?"; then
+        COPY_DESKTOP_LAYOUT=true
+        msg_ok "Copy desktop settings"
+    else
+        msg_ok "Skip desktop settings"
+    fi
 }
 
 install_icons_system_wide() {
@@ -902,7 +918,7 @@ push_config_to_users() {
 set_system_defaults() {
     [[ "$SET_SYSTEM_DEFAULTS" != true ]] && return
 
-    log "Setting system defaults for new users..."
+    _spinner_start "Setting system defaults for new users..."
 
     # Set default light/dark themes in /etc/xdg/kdeglobals
     local xdg_globals="/etc/xdg/kdeglobals"
@@ -982,6 +998,7 @@ set_system_defaults() {
     # Set keyboard shortcut in /etc/xdg/kglobalshortcutsrc
     sudo kwriteconfig6 --file /etc/xdg/kglobalshortcutsrc --group "services" --group "$SHORTCUT_ID" --key "_launch" "Meta+Shift+L"
 
+    _spinner_stop
     msg_ok "System defaults configured for new users."
 }
 
@@ -1198,7 +1215,8 @@ select_themes() {
     light_choice=$(printf '%s\n' "${display_items[@]}" | "$gum_select" --header "Select ☀️ LIGHT mode") || return 1
     dark_choice=$(printf '%s\n' "${display_items[@]}" | "$gum_select" --header "Select 🌙 DARK mode") || return 1
 
-    local light_val dark_val
+    local light_val="" dark_val=""
+    local _is_light=true
     for choice in "$light_choice" "$dark_choice"; do
         local val="$choice"
         if [[ "$choice" == "None (Disable)" ]]; then
@@ -1208,7 +1226,12 @@ select_themes() {
                 [[ "${items[$i]}" == "$choice" ]] && val="${ids[$i]}" && break
             done
         fi
-        [[ "$choice" == "$light_choice" ]] && light_val="$val" || dark_val="$val"
+        if [[ "$_is_light" == true ]]; then
+            light_val="$val"
+            _is_light=false
+        else
+            dark_val="$val"
+        fi
     done
 
     local label
@@ -1843,7 +1866,7 @@ apply_sddm_for_current_mode() {
     fi
     local bg
     bg=$(find_sddm_bg "$variant")
-    [[ -n "$bg" ]] && apply_sddm_wallpaper "$bg"
+    [[ -n "$bg" ]] && apply_sddm_wallpaper "$bg" || true
 }
 
 setup_sddm_sudoers() {
@@ -2716,7 +2739,7 @@ do_configure() {
             die "Imported config is outdated or incompatible. It may be from a different version of gloam."
         fi
         echo ""
-        log "Importing configuration from ${IMPORT_CONFIG}..."
+        _spinner_start "Importing configuration from ${IMPORT_CONFIG}..."
         # shellcheck source=/dev/null
         source "$IMPORT_CONFIG"
 
@@ -2814,6 +2837,7 @@ do_configure() {
         [[ -n "${SCRIPT_DARK:-}" && ! -f "${SCRIPT_DARK}" ]] && import_errors+=("Dark script not found: $SCRIPT_DARK")
 
         if [[ ${#import_errors[@]} -gt 0 ]]; then
+            _spinner_stop
             local error_list=""
             for err in "${import_errors[@]}"; do
                 error_list+="  • ${err}"$'\n'
@@ -2827,6 +2851,8 @@ do_configure() {
                 "$error_list"
             exit 1
         fi
+        _spinner_stop
+        msg_ok "Imported configuration from ${IMPORT_CONFIG}"
 
         # Authenticate sudo if config requires global installation
         if [[ "${INSTALL_GLOBAL:-false}" == true ]]; then
@@ -3168,6 +3194,7 @@ do_configure() {
 
     # Select Konsole profiles
     if [[ "$configure_all" == true || "$configure_konsole" == true ]]; then
+    echo ""
     if _gum_confirm "Configure Konsole profiles? (not automatically set by global theme)"; then
         mapfile -t konsole_profiles < <(scan_konsole_profiles)
 
