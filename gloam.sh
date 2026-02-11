@@ -2989,25 +2989,22 @@ do_watch() {
     plasma-apply-lookandfeel -a "$PREV_LAF" 2>/dev/null
     [[ "$auto_mode" == "true" ]] && kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
     apply_theme "$PREV_LAF" true
-    # If knighttimed has no cached location, GeoClue likely wasn't ready at boot.
-    # Wait for GeoClue in the background and restart the daemon to pick up location.
-    local state_file="${XDG_STATE_HOME:-$HOME/.local/state}/knighttimestaterc"
-    if ! grep -q 'Available=true' "$state_file" 2>/dev/null; then
-        (
-            local gc_wait=0
-            while ! busctl --system status org.freedesktop.GeoClue2 &>/dev/null; do
-                if (( gc_wait >= 60 )); then
-                    log "GeoClue not available after 60s, giving up"
-                    exit 0
-                fi
-                sleep 1
-                (( gc_wait++ ))
-            done
-            sleep 5  # give GeoClue a moment to be fully ready
-            log "Restarting knighttimed to pick up GeoClue location"
-            systemctl --user restart plasma-knighttimed.service
-        ) &
-    fi
+    # Ensure knighttimed gets a fresh GeoClue location. The daemon gives up
+    # permanently if GeoClue isn't ready at startup, so wait for it and restart.
+    (
+        local gc_wait=0
+        while ! busctl --system status org.freedesktop.GeoClue2 &>/dev/null; do
+            if (( gc_wait >= 60 )); then
+                log "GeoClue not available after 60s, giving up"
+                exit 0
+            fi
+            sleep 1
+            (( gc_wait++ ))
+        done
+        sleep 5  # give GeoClue a moment to be fully ready
+        log "Restarting knighttimed to pick up GeoClue location"
+        systemctl --user restart plasma-knighttimed.service
+    ) &
 
     local last_apply=0
     dbus-monitor --session "type='signal',interface='org.kde.KGlobalSettings',member='notifyChange',path='/KGlobalSettings'" 2>/dev/null |
