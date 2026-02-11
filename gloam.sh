@@ -73,6 +73,9 @@ SKEL_DIRS_CREATED=()
 # Previous Flatpak override values (populated during install, read during removal)
 FLATPAK_PREV_OVERRIDES=()
 
+# Session logout tracking — set to true when patches, plasmoid, or shortcut are installed
+NEEDS_LOGOUT=false
+
 # Global scripts directory
 GLOBAL_SCRIPTS_DIR="/usr/local/share/gloam"
 
@@ -432,10 +435,10 @@ install_cli_binary() {
 
 # Deploy patch files to global location so they survive across sessions
 deploy_patches_dir() {
-    [[ "$INSTALL_GLOBAL" == true ]] || return
+    [[ "$INSTALL_GLOBAL" == true ]] || return 0
     local src_patches="${GLOAM_SCRIPT_DIR}/patches"
-    [[ -d "$src_patches" ]] || return
-    [[ "$src_patches" == "${GLOBAL_SCRIPTS_DIR}/patches" ]] && return
+    [[ -d "$src_patches" ]] || return 0
+    [[ "$src_patches" == "${GLOBAL_SCRIPTS_DIR}/patches" ]] && return 0
     sudo mkdir -p "${GLOBAL_SCRIPTS_DIR}"
     sudo rm -rf "${GLOBAL_SCRIPTS_DIR}/patches"
     sudo cp -r "$src_patches" "${GLOBAL_SCRIPTS_DIR}/"
@@ -1457,6 +1460,7 @@ install_plasmoid() {
         gloam_cmd kpackagetool6 "${kp_args[@]}" --install "$plasmoid_src" >/dev/null 2>&1
     fi
 
+    NEEDS_LOGOUT=true
     msg_ok "Installed Light/Dark Mode Toggle widget."
     msg_muted "You can add it to your panel by right-clicking the panel > Add Widgets > Light/Dark Mode Toggle"
 }
@@ -1501,9 +1505,9 @@ X-KDE-GlobalAccel-CommandShortcut=true"
     # Register the shortcut with KDE (Meta+Shift+L) - always per-user
     kwriteconfig6 --file kglobalshortcutsrc --group "services" --group "$SHORTCUT_ID" --key "_launch" "Meta+Shift+L"
 
+    NEEDS_LOGOUT=true
     msg_ok "Keyboard shortcut installed: Meta+Shift+L"
     msg_muted "You can change it in System Settings > Shortcuts > Commands"
-    warn "You may need to log out and back in for the shortcut to take effect."
 }
 
 remove_shortcut() {
@@ -1810,7 +1814,8 @@ install_patch_plasma_integration() {
     fi
 
     msg_info "Installing plasma-integration (requires sudo)..."
-    sudo cp "$built_so" "$original_so"
+    sudo cp "$built_so" "${original_so}.tmp"
+    sudo mv "${original_so}.tmp" "$original_so"
 
     msg_ok "plasma-integration forceRefresh patch installed."
 }
@@ -1875,7 +1880,8 @@ install_patch_plasma_workspace() {
     fi
 
     msg_info "Installing autoswitcher module (requires sudo)..."
-    sudo cp "$built_so" "$original"
+    sudo cp "$built_so" "${original}.tmp"
+    sudo mv "${original}.tmp" "$original"
 
     msg_ok "plasma-workspace autoswitcher patch installed."
 }
@@ -1887,8 +1893,7 @@ remove_patches() {
     local integration_so
     integration_so=$(_get_plasma_integration_so) || integration_so=""
     if [[ -n "$integration_so" && -f "${integration_so}.gloam-orig" ]]; then
-        sudo cp "${integration_so}.gloam-orig" "$integration_so"
-        sudo rm "${integration_so}.gloam-orig"
+        sudo mv "${integration_so}.gloam-orig" "$integration_so"
         (( removed_count++ )) || true
     elif is_patch_plasma_integration_installed; then
         warn "plasma-integration patch is installed but no backup found. Reinstall plasma-integration to restore the original."
@@ -1899,11 +1904,10 @@ remove_patches() {
         # Try restoring from backup first
         local ws_restored=false
         local install_dir
-        for install_dir in /usr/lib/qt6/plugins/kf6/kded /usr/lib64/qt6/plugins/kf6/kded; do
+        for install_dir in /usr/lib{,64}/qt6/plugins/kf6/kded; do
             local backup="${install_dir}/lookandfeelautoswitcher.so.gloam-orig"
             if [[ -f "$backup" ]]; then
-                sudo cp "$backup" "${install_dir}/lookandfeelautoswitcher.so"
-                sudo rm "$backup"
+                sudo mv "$backup" "${install_dir}/lookandfeelautoswitcher.so"
                 (( removed_count++ )) || true
                 ws_restored=true
                 break
@@ -1934,7 +1938,7 @@ remove_patches() {
                             local built_so
                             built_so=$(find "${build_dir}/build" -name "lookandfeelautoswitcher.so" 2>/dev/null | head -1)
                             if [[ -n "$built_so" ]]; then
-                                install_dir=$(_get_kded_plugin_dir) && sudo cp "$built_so" "${install_dir}/lookandfeelautoswitcher.so"
+                                install_dir=$(_get_kded_plugin_dir) && sudo cp "$built_so" "${install_dir}/lookandfeelautoswitcher.so.tmp" && sudo mv "${install_dir}/lookandfeelautoswitcher.so.tmp" "${install_dir}/lookandfeelautoswitcher.so"
                                 (( removed_count++ )) || true
                             fi
                         else
@@ -1955,11 +1959,10 @@ remove_patches() {
     fi
 
     # Clean up orphaned backup files (e.g. leftover after system update replaced the .so)
-    for install_dir in /usr/lib/qt6/plugins/kf6/kded /usr/lib64/qt6/plugins/kf6/kded; do
-        [[ -f "${install_dir}/lookandfeelautoswitcher.so.gloam-orig" ]] && sudo rm "${install_dir}/lookandfeelautoswitcher.so.gloam-orig"
-    done
-    for install_dir in /usr/lib/qt6/plugins/platformthemes /usr/lib64/qt6/plugins/platformthemes; do
-        [[ -f "${install_dir}/KDEPlasmaPlatformTheme6.so.gloam-orig" ]] && sudo rm "${install_dir}/KDEPlasmaPlatformTheme6.so.gloam-orig"
+    local _bak
+    for _bak in /usr/lib{,64}/qt6/plugins/kf6/kded/lookandfeelautoswitcher.so.gloam-orig \
+                /usr/lib{,64}/qt6/plugins/platformthemes/KDEPlasmaPlatformTheme6.so.gloam-orig; do
+        [[ -f "$_bak" ]] && sudo rm "$_bak"
     done
 
     rm -rf "$PATCH_BUILD_DIR"
@@ -1996,8 +1999,8 @@ check_patches() {
             esac
         done
         deploy_patches_dir
+        NEEDS_LOGOUT=true
         msg_ok "Plasma patches installed."
-        msg_muted "Log out and back in for patches to take effect."
         return 0
     fi
 
@@ -2057,11 +2060,11 @@ check_patches() {
     done
 
     deploy_patches_dir
+    NEEDS_LOGOUT=true
 
     echo ""
     msg_warn "Plasma updates will overwrite these patches."
     msg_muted "Re-run 'gloam configure --patches' after updating Plasma."
-    msg_muted "Log out and back in for patches to take effect."
 }
 
 get_laf() {
@@ -2986,10 +2989,6 @@ do_watch() {
     plasma-apply-lookandfeel -a "$PREV_LAF" 2>/dev/null
     [[ "$auto_mode" == "true" ]] && kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
     apply_theme "$PREV_LAF" true
-
-    # Signal systemd that initial theme is applied — session restore can proceed
-    systemd-notify --ready 2>/dev/null || true
-
     local last_apply=0
     dbus-monitor --session "type='signal',interface='org.kde.KGlobalSettings',member='notifyChange',path='/KGlobalSettings'" 2>/dev/null |
     while read -r line; do
@@ -3032,6 +3031,26 @@ load_config_strict() {
     fi
     # shellcheck source=/dev/null
     source "$CONFIG_FILE"
+}
+
+# --- SESSION LOGOUT PROMPT ----------------------------------------------------
+
+prompt_logout_if_needed() {
+    [[ "$NEEDS_LOGOUT" == true ]] || return 0
+
+    echo ""
+    msg_warn "A session restart is needed for some changes to take effect."
+    if _gum_confirm "Log out now?"; then
+        if command -v qdbus6 &>/dev/null; then
+            qdbus6 org.kde.Shutdown /Shutdown logout
+        elif command -v qdbus &>/dev/null; then
+            qdbus org.kde.Shutdown /Shutdown logout
+        else
+            warn "Could not find qdbus. Please log out manually."
+        fi
+    else
+        msg_muted "Remember to log out and back in for all changes to take effect."
+    fi
 }
 
 # --- CLI COMMANDS -------------------------------------------------------------
@@ -3240,10 +3259,11 @@ do_configure() {
         install_patch_plasma_integration || warn "plasma-integration patch failed."
         install_patch_plasma_workspace || warn "plasma-workspace patch failed."
         deploy_patches_dir
+        NEEDS_LOGOUT=true
         echo ""
         msg_warn "Plasma updates will overwrite these patches."
         msg_muted "Re-run 'gloam configure --patches' after updating Plasma."
-        msg_muted "Log out and back in for patches to take effect."
+        prompt_logout_if_needed
         exit 0
     fi
 
@@ -4087,6 +4107,7 @@ EOF
         install_cli_binary
         [[ "$configure_widget" == true ]] && install_plasmoid
         [[ "$configure_shortcut" == true ]] && install_shortcut
+        prompt_logout_if_needed
         return 0
     fi
 
@@ -4152,7 +4173,7 @@ After=plasma-kwin_wayland.service plasma-kwin_x11.service
 Before=plasma-core.target
 
 [Service]${exec_condition}
-Type=notify
+Type=simple
 ExecStart=$executable_path watch
 Restart=on-failure
 RestartSec=5
@@ -4190,6 +4211,9 @@ WantedBy=default.target"
     # Write global installation marker
     write_global_install_marker
 
+    # Offer to log out if patches, widget, or shortcut were installed
+    prompt_logout_if_needed
+
 }
 
 do_remove() {
@@ -4208,13 +4232,11 @@ do_remove() {
     local has_patch_files=false
     local _so
     _so=$(_get_plasma_integration_so 2>/dev/null) && [[ -f "${_so}.gloam-orig" ]] && has_patch_files=true
-    if [[ "$has_patch_files" != true ]]; then
-        for _d in /usr/lib/qt6/plugins/kf6/kded /usr/lib64/qt6/plugins/kf6/kded; do
-            [[ -f "${_d}/lookandfeelautoswitcher.so.gloam-orig" ]] && { has_patch_files=true; break; }
-        done
-    fi
-    [[ "$has_patch_files" != true ]] && { is_patch_plasma_integration_installed && has_patch_files=true; }
-    [[ "$has_patch_files" != true ]] && { is_patch_plasma_workspace_installed && has_patch_files=true; }
+    for _d in /usr/lib{,64}/qt6/plugins/kf6/kded; do
+        [[ -f "${_d}/lookandfeelautoswitcher.so.gloam-orig" ]] && { has_patch_files=true; break; }
+    done
+    [[ "$has_patch_files" != true ]] && is_patch_plasma_integration_installed && has_patch_files=true
+    [[ "$has_patch_files" != true ]] && is_patch_plasma_workspace_installed && has_patch_files=true
 
     local needs_sudo=false
     [[ -f "$global_service" || -f "$global_cli" || -d "$global_plasmoid" || -f "$global_shortcut" || -d "$global_theme_light" || -d "$global_theme_dark" || -f "$skel_config" || -L "$global_service_link" || -f "$GLOBAL_INSTALL_MARKER" || -d "$GLOBAL_SCRIPTS_DIR" || -f /etc/sudoers.d/gloam-sddm || -f /etc/sudoers.d/gloam-sddm-bg || -d /usr/local/lib/gloam || -d /usr/share/wallpapers/gloam || "$has_patch_files" == true ]] && needs_sudo=true
@@ -4240,8 +4262,6 @@ do_remove() {
 
         msg_info "Requesting sudo..."
         sudo_auth || die "Sudo required to remove global files."
-    else
-        echo ""
     fi
 
     _spinner_start "Removing gloam..."
@@ -4723,6 +4743,7 @@ BANNER
     gum style --foreground "$CLR_MUTED" --italic \
         " Syncs Kvantum, GTK, and custom scripts with Plasma 6's" \
         " native light/dark (day/night) theme switching — and more."
+    echo ""
 }
 
 show_help() {
