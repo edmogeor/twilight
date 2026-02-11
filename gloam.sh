@@ -432,6 +432,7 @@ install_cli_binary() {
 
 # Deploy patch files to global location so they survive across sessions
 deploy_patches_dir() {
+    [[ "$INSTALL_GLOBAL" == true ]] || return
     local src_patches="${GLOAM_SCRIPT_DIR}/patches"
     [[ -d "$src_patches" ]] || return
     [[ "$src_patches" == "${GLOBAL_SCRIPTS_DIR}/patches" ]] && return
@@ -1710,10 +1711,22 @@ is_patch_plasma_workspace_installed() {
     return 1
 }
 
+# Get the installed plasma-workspace version tag (e.g. "v6.3.4")
+_get_plasma_workspace_version_tag() {
+    local version
+    # Try plasmashell --version first (e.g. "plasmashell 6.3.4")
+    version=$(plasmashell --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+') && [[ -n "$version" ]] && { echo "v${version}"; return 0; }
+    # Fallback: try pacman
+    version=$(pacman -Q plasma-workspace 2>/dev/null | grep -oP '\d+\.\d+\.\d+') && [[ -n "$version" ]] && { echo "v${version}"; return 0; }
+    return 1
+}
+
 # Download autoswitcher source files from plasma-workspace repo
 _download_autoswitcher_sources() {
     local dest_dir="$1"
-    local base_url="https://invent.kde.org/plasma/plasma-workspace/-/raw/master"
+    local ref
+    ref=$(_get_plasma_workspace_version_tag) || ref="master"
+    local base_url="https://invent.kde.org/plasma/plasma-workspace/-/raw/${ref}"
     local kded="kcms/lookandfeel/kded"
     local files=(
         "${kded}/lookandfeelautoswitcher.cpp" "${kded}/lookandfeelautoswitcher.h"
@@ -1765,7 +1778,7 @@ install_patch_plasma_integration() {
 
     (
         cd "$src_dir" || exit 1
-        patch -p1 < "$patch_file" >/dev/null 2>&1
+        patch -p1 < "$patch_file" >/dev/null 2>&1 || exit 4
         mkdir -p build && cd build || exit 1
         cmake .. -DCMAKE_INSTALL_PREFIX=/usr -DBUILD_QT5=OFF -DBUILD_QT6=ON >/dev/null 2>&1 || exit 2
         make -j"$(nproc)" >/dev/null 2>&1 || exit 3
@@ -1773,11 +1786,22 @@ install_patch_plasma_integration() {
     local build_rc=$?
     if [[ $build_rc -ne 0 ]]; then
         _spinner_stop
-        [[ $build_rc -eq 2 ]] && error "CMake configure failed. You may need to install build dependencies for plasma-integration." || error "Build failed for plasma-integration."
+        case $build_rc in
+            4) error "Patch failed to apply. Upstream may have changed." ;;
+            2) error "CMake configure failed. You may need to install build dependencies for plasma-integration." ;;
+            *) error "Build failed for plasma-integration." ;;
+        esac
         return 1
     fi
 
     _spinner_stop
+
+    local built_so
+    built_so=$(find "${src_dir}/build" -name "KDEPlasmaPlatformTheme6.so" 2>/dev/null | head -1)
+    if [[ -z "$built_so" ]]; then
+        error "Build produced no output."
+        return 1
+    fi
 
     # Back up the original .so for restore on remove.
     # Update the backup if Plasma replaced our patched version (e.g. system update).
@@ -1786,7 +1810,7 @@ install_patch_plasma_integration() {
     fi
 
     msg_info "Installing plasma-integration (requires sudo)..."
-    sudo make -C "${src_dir}/build" install >/dev/null 2>&1
+    sudo cp "$built_so" "$original_so"
 
     msg_ok "plasma-integration forceRefresh patch installed."
 }
@@ -1866,6 +1890,8 @@ remove_patches() {
         sudo cp "${integration_so}.gloam-orig" "$integration_so"
         sudo rm "${integration_so}.gloam-orig"
         (( removed_count++ )) || true
+    elif is_patch_plasma_integration_installed; then
+        warn "plasma-integration patch is installed but no backup found. Reinstall plasma-integration to restore the original."
     fi
 
     # Remove plasma-workspace autoswitcher patch (restore backup or rebuild)
@@ -1888,9 +1914,9 @@ remove_patches() {
         if [[ "$ws_restored" != true ]]; then
             if command -v cmake &>/dev/null && command -v make &>/dev/null && command -v curl &>/dev/null; then
                 local patches_dir
-                patches_dir=$(get_patches_dir) || { warn "Patches directory not found. Cannot rebuild."; return $(( removed_count == 0 )); }
+                patches_dir=$(get_patches_dir) || { warn "Patches directory not found. Cannot rebuild plasma-workspace autoswitcher. The patched version remains."; patches_dir=""; }
                 local standalone_dir="${patches_dir}/plasma-workspace-autoswitcher"
-                if [[ -f "${standalone_dir}/CMakeLists.txt" ]]; then
+                if [[ -n "$patches_dir" && -f "${standalone_dir}/CMakeLists.txt" ]]; then
                     _spinner_start "Restoring original plasma-workspace autoswitcher (~ 1 min)..."
                     local build_dir="${PATCH_BUILD_DIR}/plasma-workspace-autoswitcher-clean"
                     rm -rf "$build_dir"
@@ -1928,9 +1954,12 @@ remove_patches() {
         fi
     fi
 
-    # Clean up backup file if present (e.g. leftover after system update replaced the .so)
+    # Clean up orphaned backup files (e.g. leftover after system update replaced the .so)
     for install_dir in /usr/lib/qt6/plugins/kf6/kded /usr/lib64/qt6/plugins/kf6/kded; do
         [[ -f "${install_dir}/lookandfeelautoswitcher.so.gloam-orig" ]] && sudo rm "${install_dir}/lookandfeelautoswitcher.so.gloam-orig"
+    done
+    for install_dir in /usr/lib/qt6/plugins/platformthemes /usr/lib64/qt6/plugins/platformthemes; do
+        [[ -f "${install_dir}/KDEPlasmaPlatformTheme6.so.gloam-orig" ]] && sudo rm "${install_dir}/KDEPlasmaPlatformTheme6.so.gloam-orig"
     done
 
     rm -rf "$PATCH_BUILD_DIR"
@@ -1966,6 +1995,7 @@ check_patches() {
                     ;;
             esac
         done
+        deploy_patches_dir
         msg_ok "Plasma patches installed."
         msg_muted "Log out and back in for patches to take effect."
         return 0
@@ -4174,8 +4204,20 @@ do_remove() {
     local skel_config="/etc/skel/.config/gloam.conf"
     local xdg_shortcuts="/etc/xdg/kglobalshortcutsrc"
 
+    # Check for patch backup files that require sudo to restore/remove
+    local has_patch_files=false
+    local _so
+    _so=$(_get_plasma_integration_so 2>/dev/null) && [[ -f "${_so}.gloam-orig" ]] && has_patch_files=true
+    if [[ "$has_patch_files" != true ]]; then
+        for _d in /usr/lib/qt6/plugins/kf6/kded /usr/lib64/qt6/plugins/kf6/kded; do
+            [[ -f "${_d}/lookandfeelautoswitcher.so.gloam-orig" ]] && { has_patch_files=true; break; }
+        done
+    fi
+    [[ "$has_patch_files" != true ]] && { is_patch_plasma_integration_installed && has_patch_files=true; }
+    [[ "$has_patch_files" != true ]] && { is_patch_plasma_workspace_installed && has_patch_files=true; }
+
     local needs_sudo=false
-    [[ -f "$global_service" || -f "$global_cli" || -d "$global_plasmoid" || -f "$global_shortcut" || -d "$global_theme_light" || -d "$global_theme_dark" || -f "$skel_config" || -L "$global_service_link" || -f "$GLOBAL_INSTALL_MARKER" || -d "$GLOBAL_SCRIPTS_DIR" || -f /etc/sudoers.d/gloam-sddm || -f /etc/sudoers.d/gloam-sddm-bg || -d /usr/local/lib/gloam || -d /usr/share/wallpapers/gloam ]] && needs_sudo=true
+    [[ -f "$global_service" || -f "$global_cli" || -d "$global_plasmoid" || -f "$global_shortcut" || -d "$global_theme_light" || -d "$global_theme_dark" || -f "$skel_config" || -L "$global_service_link" || -f "$GLOBAL_INSTALL_MARKER" || -d "$GLOBAL_SCRIPTS_DIR" || -f /etc/sudoers.d/gloam-sddm || -f /etc/sudoers.d/gloam-sddm-bg || -d /usr/local/lib/gloam || -d /usr/share/wallpapers/gloam || "$has_patch_files" == true ]] && needs_sudo=true
 
     if [[ "$needs_sudo" == true ]]; then
         # Warn about global installation
@@ -4330,9 +4372,6 @@ do_remove() {
     [[ -f "$local_cli" ]] && { rm "$local_cli"; _remove_print "CLI (~/.local/bin/gloam)"; }
     [[ -f "$global_cli" ]] && { sudo rm "$global_cli"; _remove_print "Global CLI (/usr/local/bin/gloam)"; }
 
-    # Remove global scripts
-    [[ -d "$GLOBAL_SCRIPTS_DIR" ]] && { sudo rm -rf "$GLOBAL_SCRIPTS_DIR"; _remove_print "Custom scripts"; }
-
     # Remove SDDM sudoers rule and wrapper script
     [[ -f /etc/sudoers.d/gloam-sddm ]] && { sudo rm /etc/sudoers.d/gloam-sddm; _remove_print "SDDM theme sudoers rule"; }
     [[ -f /etc/sudoers.d/gloam-sddm-bg ]] && { sudo rm /etc/sudoers.d/gloam-sddm-bg; _remove_print "SDDM background sudoers rule"; }
@@ -4418,10 +4457,13 @@ do_remove() {
     systemctl --user daemon-reload
     _spinner_stop
 
-    # Remove Plasma patches
+    # Remove Plasma patches (before GLOBAL_SCRIPTS_DIR, which contains patch sources needed for rebuild)
     if remove_patches; then
         _remove_print "Plasma patches"
     fi
+
+    # Remove global scripts (after patches, which may need files from this directory)
+    [[ -d "$GLOBAL_SCRIPTS_DIR" ]] && { sudo rm -rf "$GLOBAL_SCRIPTS_DIR"; _remove_print "Custom scripts"; }
 
     echo ""
     if (( _removed_count > 0 )); then
