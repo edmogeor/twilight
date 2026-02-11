@@ -3235,15 +3235,22 @@ do_configure() {
 
         local _pi_installed=true _pw_installed=true
         if is_patch_plasma_integration_installed; then
-            gum style --foreground "$CLR_SUCCESS" "  ✓ plasma-integration — installed"
+            gum style --foreground "$CLR_SUCCESS" "  ✓ plasma-integration — Qt App Theme Refresh"
         else
-            gum style --foreground "$CLR_ERROR" "  ✗ plasma-integration — not installed"
+            gum style --foreground "$CLR_ERROR" "  ✗ plasma-integration — Qt App Theme Refresh"
+            msg_muted "    Without this patch, Qt apps (Dolphin, Kate, etc.) must be"
+            msg_muted "    restarted to pick up theme changes. The patch adds a DBus"
+            msg_muted "    signal handler that forces an immediate style refresh."
             _pi_installed=false
         fi
+        echo ""
         if is_patch_plasma_workspace_installed; then
-            gum style --foreground "$CLR_SUCCESS" "  ✓ plasma-workspace — installed"
+            gum style --foreground "$CLR_SUCCESS" "  ✓ plasma-workspace — Autoswitcher Override Fix"
         else
-            gum style --foreground "$CLR_ERROR" "  ✗ plasma-workspace — not installed"
+            gum style --foreground "$CLR_ERROR" "  ✗ plasma-workspace — Autoswitcher Override Fix"
+            msg_muted "    Plasma re-applies the day/night theme whenever your location"
+            msg_muted "    is polled, overriding any manual toggle. The patch changes"
+            msg_muted "    schedule refreshes to only update the timer, not the theme."
             _pw_installed=false
         fi
         echo ""
