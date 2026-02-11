@@ -4512,6 +4512,8 @@ do_remove() {
     echo ""
     if (( _removed_count > 0 )); then
         msg_ok "Remove complete."
+        NEEDS_LOGOUT=true
+        prompt_logout_if_needed
     else
         msg_muted "Nothing to remove."
     fi
