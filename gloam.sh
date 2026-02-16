@@ -2852,7 +2852,10 @@ show_osd() {
 }
 
 # Switch to a specific mode: "light" or "dark"
+# Pass --keep-auto to re-enable AutomaticLookAndFeel after plasma-apply-lookandfeel clears it.
 do_switch() {
+    local keep_auto=false
+    if [[ "${1:-}" == "--keep-auto" ]]; then keep_auto=true; shift; fi
     local mode="$1"
     load_config_strict
 
@@ -2866,32 +2869,17 @@ do_switch() {
     echo -e "Switching to ${icon} ${label} theme: ${BOLD}$friendly_name${RESET}"
     plasma-apply-lookandfeel -a "$laf" 2>/dev/null
 
+    if [[ "$keep_auto" == true ]]; then
+        kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
+    fi
+
     apply_theme "$laf"
 }
 
 do_light() { do_switch light; show_osd "weather-clear" "Light"; }
 do_dark()  { do_switch dark;  show_osd "weather-clear-night" "Dark"; }
 
-# Apply a theme while preserving AutomaticLookAndFeel (used by do_auto)
-do_switch_keep_auto() {
-    local mode="$1"
-    load_config_strict
-
-    local laf_var="LAF_${mode^^}"
-    local laf="${!laf_var}"
-
-    plasma-apply-lookandfeel -a "$laf" 2>/dev/null
-    kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
-
-    apply_theme "$laf"
-}
-
 do_auto() {
-    load_config_strict
-
-    # Enable automatic theme switching
-    kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
-
     # Determine correct theme for current time via KNightTime
     local is_daylight=true
     local subscribe_output
@@ -2921,11 +2909,10 @@ do_auto() {
             org.kde.NightTime.Manager Unsubscribe u "${cookie:-0}" &>/dev/null
     fi
 
-    echo -e "Switching to 🔄 Auto mode (following system day/night schedule)"
-    if [[ "$is_daylight" == "true" ]]; then
-        do_switch_keep_auto light
+    if [[ "$is_daylight" == true ]]; then
+        do_switch --keep-auto light
     else
-        do_switch_keep_auto dark
+        do_switch --keep-auto dark
     fi
     show_osd "contrast" "Auto"
 }
