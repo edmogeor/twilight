@@ -49,7 +49,7 @@ BLUE='\033[38;5;99m'
 RESET='\033[0m'
 
 # Version
-GLOAM_VERSION="1.3.0"
+GLOAM_VERSION="1.3.1"
 GLOAM_REPO="edmogeor/gloam"
 
 
@@ -2803,6 +2803,7 @@ do_watch() {
     local auto_mode
     auto_mode=$(kreadconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel)
     if [[ "$auto_mode" == "true" ]]; then
+        local daylight_known=false
         local is_daylight=true
         local subscribe_output
         if subscribe_output=$(busctl --user call org.kde.NightTime /org/kde/NightTime/Manager \
@@ -2824,22 +2825,33 @@ do_watch() {
                 evening_end=${timestamps[i+4]}
                 if (( now_ms >= morning_end && now_ms < evening_end )); then
                     is_daylight=true
+                    daylight_known=true
                     break
                 elif (( now_ms < morning_end )); then
                     is_daylight=false
+                    daylight_known=true
                     break
                 elif (( now_ms >= evening_end )); then
                     is_daylight=false
+                    daylight_known=true
                 fi
             done
             # Unsubscribe
             busctl --user call org.kde.NightTime /org/kde/NightTime/Manager \
                 org.kde.NightTime.Manager Unsubscribe u "${cookie:-0}" &>/dev/null
         fi
-        if [[ "$is_daylight" == "false" ]]; then
-            PREV_LAF="$LAF_DARK"
+        if [[ "$daylight_known" == true ]]; then
+            if [[ "$is_daylight" == "false" ]]; then
+                PREV_LAF="$LAF_DARK"
+            else
+                PREV_LAF="$LAF_LIGHT"
+            fi
         else
-            PREV_LAF="$LAF_LIGHT"
+            # KNightTime unavailable or has no schedule yet (GeoClue not ready);
+            # fall back to whichever theme Plasma persisted from the last session
+            log "KNightTime schedule unavailable, using persisted theme"
+            PREV_LAF=$(kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage)
+            [[ -z "$PREV_LAF" || ("$PREV_LAF" != "$LAF_LIGHT" && "$PREV_LAF" != "$LAF_DARK") ]] && PREV_LAF="$LAF_LIGHT"
         fi
     else
         PREV_LAF=$(kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage)
@@ -2858,6 +2870,8 @@ do_watch() {
     fi
     # Ensure knighttimed gets a fresh GeoClue location. The daemon gives up
     # permanently if GeoClue isn't ready at startup, so wait for it and restart.
+    # After restarting, re-query the schedule and correct the theme if needed,
+    # since Plasma's auto mode may not immediately re-evaluate.
     (
         local gc_wait=0
         while ! busctl --system status org.freedesktop.GeoClue2 &>/dev/null; do
@@ -2871,6 +2885,56 @@ do_watch() {
         sleep 5  # give GeoClue a moment to be fully ready
         log "Restarting knighttimed to pick up GeoClue location"
         systemctl --user restart plasma-knighttimed.service
+        # Wait for knighttimed to produce a schedule with actual timestamps
+        local kn_wait=0 sub_out
+        while true; do
+            if sub_out=$(busctl --user call org.kde.NightTime /org/kde/NightTime/Manager \
+                    org.kde.NightTime.Manager Subscribe 'a{sv}' 0 2>/dev/null) \
+                    && [[ "$sub_out" == *"a(xxxxx)"* ]] \
+                    && ! [[ "$sub_out" =~ a\(xxxxx\)\ 0$ ]]; then
+                break
+            fi
+            if (( kn_wait >= 30 )); then
+                log "KNightTime schedule not available after 30s, giving up"
+                exit 0
+            fi
+            sleep 1
+            (( kn_wait++ ))
+        done
+        if [[ -n "$sub_out" ]]; then
+            local ck
+            ck=$(echo "$sub_out" | grep -oP '(?<="Cookie" u )\d+')
+            local now_ms
+            now_ms=$(date +%s%3N)
+            local -a ts
+            read -ra ts <<< "$(echo "$sub_out" | sed 's/.*a(xxxxx) [0-9]* //')"
+            local is_day=true day_known=false i me ee
+            for (( i=0; i < ${#ts[@]}; i+=5 )); do
+                me=${ts[i+2]}; ee=${ts[i+4]}
+                if (( now_ms >= me && now_ms < ee )); then
+                    is_day=true; day_known=true; break
+                elif (( now_ms < me )); then
+                    is_day=false; day_known=true; break
+                elif (( now_ms >= ee )); then
+                    is_day=false; day_known=true
+                fi
+            done
+            busctl --user call org.kde.NightTime /org/kde/NightTime/Manager \
+                org.kde.NightTime.Manager Unsubscribe u "${ck:-0}" &>/dev/null
+            if [[ "$day_known" == true ]]; then
+                local correct_laf="$LAF_LIGHT"
+                [[ "$is_day" == false ]] && correct_laf="$LAF_DARK"
+                local current_laf
+                current_laf=$(kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage)
+                if [[ "$current_laf" != "$correct_laf" ]]; then
+                    log "GeoClue fix: correcting theme from $current_laf to $correct_laf"
+                    plasma-apply-lookandfeel -a "$correct_laf" 2>/dev/null
+                    kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
+                    apply_theme "$correct_laf"
+                    set_mode auto
+                fi
+            fi
+        fi
     ) &
 
     local last_apply=0
