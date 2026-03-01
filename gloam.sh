@@ -49,7 +49,7 @@ BLUE='\033[38;5;99m'
 RESET='\033[0m'
 
 # Version
-GLOAM_VERSION="1.3.1"
+GLOAM_VERSION="1.3.2"
 GLOAM_REPO="edmogeor/gloam"
 
 
@@ -2931,6 +2931,10 @@ do_watch() {
                     plasma-apply-lookandfeel -a "$correct_laf" 2>/dev/null
                     kwriteconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel true
                     apply_theme "$correct_laf"
+                    # Record the apply timestamp so the main dbus-monitor loop
+                    # debounces the notifyChange signal emitted by
+                    # plasma-apply-lookandfeel above and doesn't apply twice.
+                    date +%s > "${XDG_RUNTIME_DIR}/gloam-last-apply"
                     set_mode auto
                 fi
             fi
@@ -2938,33 +2942,48 @@ do_watch() {
     ) &
 
     local last_apply=0
-    dbus-monitor --session "type='signal',interface='org.kde.KGlobalSettings',member='notifyChange',path='/KGlobalSettings'" 2>/dev/null |
-    while read -r line; do
-        [[ "$line" == *"member=notifyChange"* ]] || continue
-        # Debounce: ignore events within 3 seconds of last apply to prevent
-        # feedback loop with Plasma's AutomaticLookAndFeel
-        local now
-        now=$(date +%s)
-        if (( now - last_apply < 3 )); then
-            continue
-        fi
-        reload_laf_config
-        laf=$(get_laf)
-        if [[ "$laf" != "$PREV_LAF" ]]; then
-            apply_theme "$laf"
-            PREV_LAF="$laf"
-            last_apply=$(date +%s)
-            # Notify the plasmoid
-            local auto_mode
-            auto_mode=$(kreadconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel)
-            if [[ "$auto_mode" == "true" ]]; then
-                set_mode auto
-            elif [[ "$laf" == "$LAF_DARK" ]]; then
-                set_mode dark
-            else
-                set_mode light
+    # Retry loop: dbus-monitor exits immediately if the session bus isn't ready
+    # yet (can happen on the first startup attempt before plasma-core.target is
+    # fully initialised). Retrying here avoids a service failure/restart cycle
+    # that would skip the initial theme application entirely.
+    while true; do
+        dbus-monitor --session "type='signal',interface='org.kde.KGlobalSettings',member='notifyChange',path='/KGlobalSettings'" 2>/dev/null |
+        while read -r line; do
+            [[ "$line" == *"member=notifyChange"* ]] || continue
+            # Debounce: ignore events within 3 seconds of last apply to prevent
+            # feedback loop with Plasma's AutomaticLookAndFeel. Also check the
+            # shared timestamp written by the GeoClue background subshell so
+            # that its plasma-apply-lookandfeel call doesn't trigger a redundant
+            # second apply from this loop.
+            local now
+            now=$(date +%s)
+            local subshell_apply=0
+            [[ -f "${XDG_RUNTIME_DIR}/gloam-last-apply" ]] && \
+                subshell_apply=$(cat "${XDG_RUNTIME_DIR}/gloam-last-apply" 2>/dev/null || echo 0)
+            if (( now - last_apply < 3 )) || (( now - subshell_apply < 3 )); then
+                continue
             fi
-        fi
+            reload_laf_config
+            laf=$(get_laf)
+            if [[ "$laf" != "$PREV_LAF" ]]; then
+                apply_theme "$laf"
+                PREV_LAF="$laf"
+                last_apply=$(date +%s)
+                # Notify the plasmoid
+                local auto_mode
+                auto_mode=$(kreadconfig6 --file kdeglobals --group KDE --key AutomaticLookAndFeel)
+                if [[ "$auto_mode" == "true" ]]; then
+                    set_mode auto
+                elif [[ "$laf" == "$LAF_DARK" ]]; then
+                    set_mode dark
+                else
+                    set_mode light
+                fi
+            fi
+        done
+        # dbus-monitor exited (session bus not yet ready or transient disconnect).
+        # Wait briefly before retrying.
+        sleep 1
     done
 }
 

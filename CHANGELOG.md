@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.3.2] - 2026-03-01
+
+### Fixed
+- **Look and feel not applied on first boot:** `dbus-monitor` would exit immediately if the KDE session bus wasn't fully initialised yet (the service starts `Before=plasma-core.target`), causing the watcher to exit with status 1 before Plasma was ready to handle it. The service would restart after 5 seconds but the initial theme application was skipped in the failed first attempt. The `dbus-monitor` call is now wrapped in a retry loop so startup proceeds correctly on the first attempt
+- **Duplicate theme applies after GeoClue correction:** when the GeoClue background subshell corrected the theme post-startup, `plasma-apply-lookandfeel` emitted a `notifyChange` DBus signal that the main monitor loop also acted on, applying the theme a second time. The subshell now writes a timestamp to `$XDG_RUNTIME_DIR/gloam-last-apply` which the main loop includes in its debounce check
+
 ## [1.3.0] - 2026-02-27
 
 ### Fixed
