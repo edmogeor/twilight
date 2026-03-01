@@ -13,7 +13,7 @@
         "Id": "org.kde.plasma.lightdarktoggle",
         "License": "GPL-3.0",
         "Name": "Light/Dark Mode Toggle",
-        "Version": "1.3.2"
+        "Version": "1.3.3"
     },
     "X-Plasma-API-Minimum-Version": "6.0"
 }
