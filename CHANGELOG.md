@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.3.5] - 2026-03-01
+
+### Fixed
+- **Automatic theme switching not firing at sunset/sunrise:** `plasma-apply-lookandfeel` sets `AutomaticLookAndFeel=false` unless the `-k` flag is passed. Gloam's boot-time call caused a transient flip-flop that disrupted the KDE `lookandfeelautoswitcher` timer, preventing it from firing at sunrise/sunset transitions. Gloam now uses `-k` where auto mode should be preserved, and skips `plasma-apply-lookandfeel` entirely on boot in auto mode — the autoswitcher handles the KDE theme while gloam only syncs external themes (Kvantum, GTK, etc.)
+- **GeoClue correction overwriting autoswitcher state:** the GeoClue background subshell no longer applies the KDE theme directly; it restarts `knighttimed` and lets the autoswitcher re-evaluate via its `scheduleChanged` signal
+
 ## [1.3.2] - 2026-03-01
 
 ### Fixed

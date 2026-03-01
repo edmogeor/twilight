@@ -49,7 +49,7 @@ BLUE='\033[38;5;99m'
 RESET='\033[0m'
 
 # Version
-GLOAM_VERSION="1.3.4"
+GLOAM_VERSION="1.3.5"
 GLOAM_REPO="edmogeor/gloam"
 
 
@@ -2904,42 +2904,15 @@ do_watch() {
             sleep 1
             (( kn_wait++ ))
         done
+        # In auto mode, the autoswitcher will re-evaluate when knighttimed
+        # emits a new schedule after getting the GeoClue location. No need
+        # for gloam to apply the KDE theme — the notifyChange watcher will
+        # sync external themes when the autoswitcher fires.
         if [[ -n "$sub_out" ]]; then
             local ck
             ck=$(echo "$sub_out" | grep -oP '(?<="Cookie" u )\d+')
-            local now_ms
-            now_ms=$(date +%s%3N)
-            local -a ts
-            read -ra ts <<< "$(echo "$sub_out" | sed 's/.*a(xxxxx) [0-9]* //')"
-            local is_day=true day_known=false i me ee
-            for (( i=0; i < ${#ts[@]}; i+=5 )); do
-                me=${ts[i+2]}; ee=${ts[i+4]}
-                if (( now_ms >= me && now_ms < ee )); then
-                    is_day=true; day_known=true; break
-                elif (( now_ms < me )); then
-                    is_day=false; day_known=true; break
-                elif (( now_ms >= ee )); then
-                    is_day=false; day_known=true
-                fi
-            done
             busctl --user call org.kde.NightTime /org/kde/NightTime/Manager \
                 org.kde.NightTime.Manager Unsubscribe u "${ck:-0}" &>/dev/null
-            if [[ "$day_known" == true ]]; then
-                local correct_laf="$LAF_LIGHT"
-                [[ "$is_day" == false ]] && correct_laf="$LAF_DARK"
-                local current_laf
-                current_laf=$(kreadconfig6 --file kdeglobals --group KDE --key LookAndFeelPackage)
-                if [[ "$current_laf" != "$correct_laf" ]]; then
-                    log "GeoClue fix: correcting theme from $current_laf to $correct_laf"
-                    plasma-apply-lookandfeel -a "$correct_laf" -k 2>/dev/null
-                    apply_theme "$correct_laf"
-                    # Record the apply timestamp so the main dbus-monitor loop
-                    # debounces the notifyChange signal emitted by
-                    # plasma-apply-lookandfeel above and doesn't apply twice.
-                    date +%s > "${XDG_RUNTIME_DIR}/gloam-last-apply"
-                    set_mode auto
-                fi
-            fi
         fi
     ) &
 
