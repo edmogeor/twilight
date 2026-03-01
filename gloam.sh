@@ -49,7 +49,7 @@ BLUE='\033[38;5;99m'
 RESET='\033[0m'
 
 # Version
-GLOAM_VERSION="1.3.2"
+GLOAM_VERSION="1.3.3"
 GLOAM_REPO="edmogeor/gloam"
 
 
@@ -2947,9 +2947,11 @@ do_watch() {
     # fully initialised). Retrying here avoids a service failure/restart cycle
     # that would skip the initial theme application entirely.
     while true; do
-        dbus-monitor --session "type='signal',interface='org.kde.KGlobalSettings',member='notifyChange',path='/KGlobalSettings'" 2>/dev/null |
+        dbus-monitor --session \
+            "type='signal',interface='org.kde.KGlobalSettings',member='notifyChange',path='/KGlobalSettings'" \
+            "type='signal',interface='org.kde.NightTime.Manager',member='Refreshed'" 2>/dev/null |
         while read -r line; do
-            [[ "$line" == *"member=notifyChange"* ]] || continue
+            [[ "$line" == *"member=notifyChange"* || "$line" == *"member=Refreshed"* ]] || continue
             # Debounce: ignore events within 3 seconds of last apply to prevent
             # feedback loop with Plasma's AutomaticLookAndFeel. Also check the
             # shared timestamp written by the GeoClue background subshell so

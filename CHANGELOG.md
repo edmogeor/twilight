@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.3.3] - 2026-03-01
+
+### Fixed
+- **Theme not switching with manual schedule:** gloam only monitored `org.kde.KGlobalSettings.notifyChange` to detect LAF changes, but KNightTime emits `org.kde.NightTime.Manager.Refreshed` when a manually-configured schedule triggers. This signal was never received, so gloam would not apply external themes when the transition fired. The watcher now monitors both signals
+
 ## [1.3.2] - 2026-03-01
 
 ### Fixed
